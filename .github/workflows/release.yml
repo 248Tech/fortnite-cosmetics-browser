@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: python -m pip install --upgrade pip pillow pyinstaller
+      - name: Build exe
+        run: pyinstaller --noconfirm --onefile --windowed --name FortniteCosmeticsBrowser --icon assets/icon.ico fortnite_cosmetics_browser.pyw
+      - name: Zip portable build
+        shell: pwsh
+        run: Compress-Archive -Path dist/FortniteCosmeticsBrowser.exe, LICENSE, README.md -DestinationPath "dist/FortniteCosmeticsBrowser-${{ github.ref_name }}-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FortniteCosmeticsBrowser-windows
+          path: dist/*
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/FortniteCosmeticsBrowser.exe
+            dist/FortniteCosmeticsBrowser-*.zip
+          body_path: .github/release-notes.md
+          generate_release_notes: true

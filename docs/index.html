@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Fortnite Cosmetics Browser &amp; Item Shop Viewer - Free &amp; Open Source | 248Tech</title>
+  <meta name="description" content="Browse every Fortnite cosmetic (16,000+ skins, outfits, emotes, pickaxes, gliders, wraps and kicks) and today's Fortnite Item Shop with V-Bucks prices. Free, open source, no login. Live web demo plus a Windows desktop app by 248Tech.">
+  <meta name="keywords" content="Fortnite cosmetics, Fortnite skins, Fortnite item shop, Fortnite shop today, Fortnite locker, all Fortnite skins, Fortnite emotes, Fortnite pickaxes, Fortnite skin viewer, fortnite-api, open source, 248Tech">
+  <meta name="author" content="248Tech">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <meta name="theme-color" content="#121318">
+  <link rel="canonical" href="https://248tech.github.io/fortnite-cosmetics-browser/">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="images/icon-256.png">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="248Tech">
+  <meta property="og:title" content="Fortnite Cosmetics Browser & Item Shop Viewer by 248Tech">
+  <meta property="og:description" content="Search all 16,000+ Fortnite cosmetics and today's Item Shop. Free and open source, with a Windows desktop app.">
+  <meta property="og:url" content="https://248tech.github.io/fortnite-cosmetics-browser/">
+  <meta property="og:image" content="https://248tech.github.io/fortnite-cosmetics-browser/images/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Fortnite Cosmetics Browser & Item Shop Viewer by 248Tech">
+  <meta name="twitter:description" content="Search all 16,000+ Fortnite cosmetics and today's Item Shop. Free and open source.">
+  <meta name="twitter:image" content="https://248tech.github.io/fortnite-cosmetics-browser/images/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Fortnite Cosmetics Browser",
+    "description": "Free, open-source browser for every Fortnite cosmetic and the daily Fortnite Item Shop. Available as a web app and a Windows desktop app.",
+    "applicationCategory": "GameApplication",
+    "operatingSystem": "Windows 10, Windows 11, Web",
+    "url": "https://248tech.github.io/fortnite-cosmetics-browser/",
+    "downloadUrl": "https://github.com/248Tech/fortnite-cosmetics-browser/releases/latest",
+    "codeRepository": "https://github.com/248Tech/fortnite-cosmetics-browser",
+    "license": "https://opensource.org/licenses/MIT",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "author": { "@type": "Organization", "name": "248Tech", "url": "https://248tech.com" },
+    "publisher": { "@type": "Organization", "name": "248Tech", "url": "https://248tech.com" }
+  }
+  </script>
+  <link rel="preconnect" href="https://fortnite-api.com">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="./" aria-label="Fortnite Cosmetics Browser home">
+      <span class="brand-logo">FORTNITE</span>
+      <span class="brand-sub">Cosmetics Browser <span class="brand-by">by 248Tech</span></span>
+    </a>
+    <nav class="nav">
+      <button class="nav-item" data-mode="browse">Cosmetics <span class="nav-meta" id="browseCount"></span></button>
+      <button class="nav-item" data-mode="shop">Item Shop <span class="nav-meta" id="shopCountdown"></span></button>
+    </nav>
+    <div class="side-heading" id="sideHeading">Categories</div>
+    <div class="side-list" id="sideList"></div>
+    <div class="side-footer">
+      <a class="side-cta" href="https://github.com/248Tech/fortnite-cosmetics-browser/releases/latest" rel="noopener">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5.5 10 4.5v7H3zM11 4.4 21 3v8.5H11zM3 12.5h7v7L3 18.5zM11 12.5h10V21l-10-1.4z"/></svg>
+        Get the Windows app
+      </a>
+      <div class="side-links">
+        <a href="https://github.com/248Tech/fortnite-cosmetics-browser" rel="noopener">GitHub</a> ·
+        <a href="https://248tech.com" rel="noopener">248Tech</a>
+      </div>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <main class="main">
+    <header class="toolbar">
+      <button class="icon-btn menu-btn" id="menuBtn" aria-label="Open menu">
+        <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <label class="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="search" type="search" placeholder="Search cosmetics, sets, IDs..." autocomplete="off" spellcheck="false" aria-label="Search">
+        <kbd>/</kbd>
+      </label>
+      <div class="browse-tools" id="browseTools">
+        <select id="rarity" aria-label="Rarity"><option>All rarities</option></select>
+        <select id="sort" aria-label="Sort"></select>
+      </div>
+      <div class="seg" id="sizeSeg" role="group" aria-label="Tile size">
+        <button data-size="S">S</button><button data-size="M">M</button><button data-size="L">L</button>
+      </div>
+      <a class="btn btn-ghost gh-btn" href="https://github.com/248Tech/fortnite-cosmetics-browser" rel="noopener" aria-label="View on GitHub">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>Star on GitHub</span>
+      </a>
+    </header>
+
+    <div class="grid-wrap" id="gridWrap" tabindex="0" aria-label="Cosmetics grid">
+      <div class="grid-inner" id="gridInner"></div>
+      <div class="empty" id="empty">
+        <div class="spinner"></div>
+        <p>Loading 16,000+ Fortnite cosmetics...</p>
+      </div>
+    </div>
+
+    <footer class="status">
+      <span id="status">Loading...</span>
+      <span class="status-right">Data: <a href="https://fortnite-api.com" rel="noopener">fortnite-api.com</a> · Not affiliated with Epic Games</span>
+    </footer>
+  </main>
+
+  <aside class="detail" id="detail" aria-live="polite">
+    <button class="icon-btn detail-close" id="detailClose" aria-label="Close details">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+    <div id="detailBody" hidden></div>
+    <section class="about" id="about">
+      <div class="about-badge">Free · Open source · No login</div>
+      <h1>Every Fortnite cosmetic in one fast browser</h1>
+      <p>Search and filter all <strong>16,000+ Fortnite cosmetics</strong> (outfits, back blings, pickaxes, emotes, gliders, wraps, kicks and more) and see <strong>today's Fortnite Item Shop</strong> with V-Bucks prices, discounts and when each offer leaves.</p>
+      <ul class="about-list">
+        <li>Instant search across names, sets and IDs</li>
+        <li>Live Item Shop with countdown to the daily reset</li>
+        <li>"In shop" badges and one-click links to fortnite.com</li>
+        <li>Keyboard friendly: <kbd>/</kbd> search, arrow keys, <kbd>Enter</kbd></li>
+      </ul>
+      <p>This page is the live demo of the <strong>Fortnite Cosmetics Browser</strong> desktop app for Windows, built by <a href="https://248tech.com" rel="noopener">248Tech</a>. The desktop version adds an offline icon cache, CSV export and native performance.</p>
+      <div class="about-actions">
+        <a class="btn btn-accent" href="https://github.com/248Tech/fortnite-cosmetics-browser/releases/latest" rel="noopener">Download for Windows</a>
+        <a class="btn btn-ghost" href="https://github.com/248Tech/fortnite-cosmetics-browser" rel="noopener">View source</a>
+      </div>
+      <p class="about-hint">Select any tile to see its details.</p>
+      <p class="about-legal">Fortnite is a trademark of Epic Games, Inc. This project is not affiliated with, endorsed or sponsored by Epic Games. Cosmetic data and images are provided by fortnite-api.com.</p>
+    </section>
+  </aside>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<noscript><p style="padding:24px;color:#fff">The Fortnite Cosmetics Browser needs JavaScript to load cosmetic data.</p></noscript>
+<script src="app.js"></script>
+</body>
+</html>

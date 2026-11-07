@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Live web demo
+    url: https://248tech.github.io/fortnite-cosmetics-browser/
+    about: Try the browser version

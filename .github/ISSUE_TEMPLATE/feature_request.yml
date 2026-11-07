@@ -1,0 +1,16 @@
+name: Feature request
+description: Suggest an idea
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: Describe the feature and why it would help.
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Which version?
+      options: [Desktop app, Web demo, Both]
