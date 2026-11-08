@@ -18,6 +18,29 @@ jobs:
           python-version: "3.12"
       - name: Compile desktop app
         run: python -m py_compile fortnite_cosmetics_browser.pyw
+      - name: Check scraper and weapon data
+        run: |
+          python -m py_compile tools/scrape_fortnitegg.py
+          python -c "import json; d = json.load(open('docs/data/weapons.json', encoding='utf-8')); assert d['schema'] == 1 and d['lootPool'] and d['catalog']; print('weapons.json OK:', len(d['lootPool']), 'loot pool,', len(d['catalog']), 'catalog')"
+          python -c "import json; d = json.load(open('docs/data/map.json', encoding='utf-8')); L = [l for g in d['groups'] for l in g['layers']]; assert d['schema'] == 1 and d['tiles'] and L and all(l['kind'] in ('markers', 'labels', 'lines', 'tunnels') for l in L); print('map.json OK: season', d['season'], len(L), 'layers')"
+          python -c "import json; d = json.load(open('docs/data/news.json', encoding='utf-8')); assert d['schema'] == 1 and d['items'] and all(i['title'] for i in d['items']); print('news.json OK:', len(d['items']), 'stories')"
+      - name: Validate Sprite catalog
+        run: |
+          python - <<'EOF'
+          import json
+          d = json.load(open("docs/data/sprites.json", encoding="utf-8"))
+          assert d["schema"] == 1
+          vids = {v["id"] for v in d["variants"]}
+          sids = [s["id"] for s in d["seasons"]]
+          assert d["current"] in sids and len(sids) == len(set(sids))
+          for se in d["seasons"]:
+              ids = [sp["id"] for sp in se["sprites"]]
+              assert len(ids) == len(set(ids)), f"duplicate sprite id in {se['id']}"
+              for sp in se["sprites"]:
+                  for v in sp.get("variants", []) + sp.get("upcoming", []):
+                      assert v in vids, f"{sp['id']}: unknown variant {v}"
+          print("sprites.json OK:", sum(len(s["sprites"]) for s in d["seasons"]), "sprites")
+          EOF
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

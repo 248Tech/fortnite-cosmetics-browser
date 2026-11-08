@@ -1,0 +1,59 @@
+name: Refresh Fortnite.GG data
+
+# Re-scrapes Fortnite.GG and commits docs/data/*.json when they change. GitHub Pages then serves the new files and
+# both apps pick them up on next launch.
+#   daily 09:17 UTC : weapons + map + news
+#   every 3 hours   : news only (Epic posts news several times a day)
+on:
+  schedule:
+    - cron: "17 9 * * *"     # shortly after the 09:00 UTC-ish loot pool updates
+    - cron: "47 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-fortnitegg-data
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Scrape Fortnite.GG
+        run: |
+          if [ "${{ github.event.schedule }}" = "47 */3 * * *" ]; then
+            python tools/scrape_fortnitegg.py --only news --delay 1.0
+          else
+            python tools/scrape_fortnitegg.py --delay 1.0
+          fi
+      - name: Commit if changed
+        run: |
+          # ignore the "updated" date so unchanged data doesn't create a commit every day
+          python - <<'EOF'
+          import json, subprocess
+          for f in ("docs/data/weapons.json", "docs/data/map.json", "docs/data/news.json"):
+              old = subprocess.run(["git", "show", f"HEAD:{f}"], capture_output=True, text=True).stdout
+              try:
+                  a, b = json.loads(old), json.load(open(f, encoding="utf-8"))
+              except Exception:
+                  continue  # new file or unreadable: keep the fresh copy
+              a.pop("updated", None); b.pop("updated", None)
+              for d in (a, b):  # vote counts drift all day; only new/changed stories should commit
+                  for it in d.get("items") or []:
+                      it.pop("votes", None)
+              if a == b:
+                  subprocess.run(["git", "checkout", "--", f], check=True)
+                  print(f"{f}: only the date changed")
+          EOF
+          git add docs/data/weapons.json docs/data/map.json docs/data/news.json
+          if git diff --cached --quiet; then echo "no change"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update Fortnite.GG data (weapons, map, news)"
+          git push

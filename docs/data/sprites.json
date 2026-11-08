@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "updated": "2026-11-07",
+  "credits": "Sprite images: Fortnite.GG (https://fortnite.gg/sprites)",
+  "note": "Community-maintained Sprite catalog for Fortnite Cosmetics Browser. Epic has no public Sprite API, so this file is edited by hand. Add new sprites, variants or seasons here - both apps pick changes up without an update. Ids are permanent: never rename one, or saved progress is lost. Art: both apps look up '<Name> - Item - Fortnite.png' / '<Variant> <Name> - Item - Fortnite.png' (also '<Name> Sprite ...') on the Fortnite Wiki at runtime. Images come from Fortnite.GG: sprite \"fgg\" = internal name, variant \"fgg\" = icon suffix (https://fortnite.gg/img/x/sprites/icons/T_Icon_BR_Creature_Sprite_<fgg><suffix>_L.webp). Other optional per-sprite fields: \"wiki\" (exact wiki name), \"image\" (URL), \"images\" ({variantId: URL}).",
+  "current": "c7-treasure-hunters",
+  "dustCost": {
+    "rare": { "base": 1250, "variant": 1500 },
+    "epic": { "base": 1500, "variant": 1800 },
+    "legendary": { "base": 1750, "variant": 2100 },
+    "mythic": { "base": 2000, "variant": 2400 }
+  },
+  "variants": [
+    { "id": "fortune", "fgg": "_Jeweled", "theme": "#8f1f22", "name": "Fortune", "color": "#e0384f", "description": "Red jeweled finish. Keeps the base ability and also reveals nearby chests. Red Ruby Sprite Chests guarantee a random Fortune Sprite." },
+    { "id": "cursed", "fgg": "_Cursed", "theme": "#3d2470", "name": "Cursed", "color": "#8a4dff", "description": "Better odds of finding rare Sprite variants, but water damages you while it is equipped. Vaulted at launch, returning Nov 7.", "releaseDate": "2026-11-07" },
+    { "id": "gold", "fgg": "_Gold", "theme": "#8a6d12", "name": "Gold", "color": "#f2c14e", "description": "Returning Gold finish with 3x elimination Sprite XP.", "releaseDate": "2026-11-12" }
+  ],
+  "seasons": [
+    {
+      "id": "c7-treasure-hunters",
+      "name": "Treasure Hunters",
+      "chapter": 7,
+      "label": "Chapter 7 · Treasure Hunters",
+      "version": "v43.00",
+      "start": "2026-11-01",
+      "howToGet": "Tear down a Wanted Poster on Crossbones Isle for a Sprite Treasure Map, then dig up the buried Sprite Chest. Mastered sprites cost half Sprite Dust to resummon.",
+      "sprites": [
+        { "id": "halfpeeld", "fgg": "PeelyBones", "name": "Halfpeel'd", "rarity": "rare", "color": "#f2d03b",
+          "ability": "Marks eliminations on the map. Detection range grows with each level.",
+          "variants": ["fortune", "cursed", "gold"] },
+        { "id": "repete", "fgg": "Parrot", "name": "Re-Pete", "rarity": "rare", "color": "#4fb5ff",
+          "ability": "Faster reloads, with a chance to refund some ammo.",
+          "variants": ["fortune", "cursed", "gold"] },
+        { "id": "barryofish", "fgg": "BarrelOfFish", "name": "Barry O'Fish", "rarity": "rare", "color": "#2fc4b2",
+          "ability": "Uses less stamina while sprinting through water. Grants the Slap effect at max level.",
+          "variants": ["fortune", "cursed", "gold"] },
+        { "id": "transpondersnail", "fgg": "FeedJet", "name": "Transponder Snail", "rarity": "rare", "color": "#c98a4b",
+          "ability": "Extra resources from pickups for you and your party. Bonus grows with each level.",
+          "variants": ["gold"] },
+        { "id": "wayfinder", "fgg": "Compass", "name": "Wayfinder", "rarity": "epic", "color": "#7fd36b",
+          "ability": "Reveals nearby Sprites and adds extra loot to Buried Chests.",
+          "variants": ["fortune", "cursed", "gold"] },
+        { "id": "kelper", "fgg": "UnbotheredFish", "name": "Kelper", "rarity": "epic", "color": "#3fa66a",
+          "ability": "Restores health over time while in water. Bigger heals with each level.",
+          "variants": ["fortune", "cursed", "gold"] },
+        { "id": "liluzivertjr", "fgg": "RookGecko", "name": "Lil' Uzi Vert Jr.", "rarity": "epic", "color": "#d04bd8",
+          "ability": "Collab sprite arriving on a Captain's Day. Ability not confirmed yet.",
+          "releaseDate": "2026-11-08",
+          "variants": ["fortune", "cursed"] },
+        { "id": "exmarks", "fgg": "TreasureMap", "name": "Exmarks", "rarity": "legendary", "color": "#e5a43a",
+          "ability": "Reveals nearby Treasure Maps and Wanted Posters. Spawns a Treasure Map at max level.",
+          "variants": ["fortune", "cursed", "gold"] },
+        { "id": "lilsquibbly", "fgg": "SquibblySprite", "name": "Lil' Squibbly", "rarity": "legendary", "color": "#9a6cf0",
+          "ability": "Jump into fishing holes to catch fish and score bonus loot.",
+          "variants": ["fortune", "cursed", "gold"] },
+        { "id": "lilflacko", "fgg": "PlaymakerBrewery", "name": "Lil' Flacko", "rarity": "legendary", "color": "#e5534b",
+          "ability": "Creates a small shockwave when you land, knocking opponents back.",
+          "where": "Buried Sprite Chests, or a chance from A$AP Rocky aboard the $.$. Rocky.",
+          "variants": ["fortune", "cursed", "gold"] },
+        { "id": "chester", "fgg": "TreasureChest", "name": "Chester", "rarity": "legendary", "color": "#b5763a",
+          "ability": "Chests may spawn extra loot. Cancels fall damage.",
+          "variants": ["fortune", "cursed", "gold"] },
+        { "id": "plundarrgh", "fgg": "CoinPile", "name": "Plundarrgh", "rarity": "mythic", "color": "#d9b23a",
+          "ability": "Opening chests boosts your pickaxe and movement speed.",
+          "variants": ["fortune", "cursed", "gold"] },
+        { "id": "sweetdreams", "fgg": "StarLight", "name": "Sweet Dreams", "rarity": "mythic", "color": "#f08cc8",
+          "ability": "Grants a random item with each level-up, with Mythic loot at max level.",
+          "variants": ["gold"], "upcoming": ["fortune", "cursed"] }
+      ]
+    }
+  ]
+}

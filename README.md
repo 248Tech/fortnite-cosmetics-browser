@@ -4,7 +4,7 @@
 
 # Fortnite Cosmetics Browser
 
-**Every Fortnite cosmetic and today's Item Shop in one fast, beautiful app.**
+**Every Fortnite cosmetic, today's Item Shop and a Sprite collection tracker in one fast, beautiful app.**
 Search all 16,000+ skins, emotes, pickaxes, gliders, wraps and kicks, check today's shop with V-Bucks prices, and jump straight to any item on fortnite.com. Free, open source, no login.
 
 [![Live demo](https://img.shields.io/badge/Live%20demo-Open%20in%20browser-4f8cff?style=for-the-badge&logo=googlechrome&logoColor=white)](https://248tech.github.io/fortnite-cosmetics-browser/)
@@ -28,6 +28,10 @@ Looking up a Fortnite skin usually means ad-heavy sites, slow pages and endless 
 - ⚡ **Instant search across 16,000+ cosmetics.** Filter by category and rarity, sort by newest, name or rarity, and scroll the whole catalog without lag.
 - 🛒 **Today's Item Shop, live.** Every offer grouped into its shop section, with V-Bucks prices, discounts, "leaves in" timers and a countdown to the daily reset.
 - 🏷️ **"In shop" badges everywhere.** Spot which cosmetics you can buy today, then jump from an item to its offer and from a bundle to every item inside it.
+- ✨ **Sprite tracker.** Every Sprite and every Fortune, Cursed and Gold version as its own card with Owned and Mastered checkboxes, using official sprite images from [Fortnite.GG](https://fortnite.gg/sprites).
+- 📰 **Fortnite news.** Epic's official news posts with images, what's in game right now, links straight to the featured cosmetics, grouped by month and searchable (archive from [Fortnite.GG](https://fortnite.gg/news) refreshed every 3 hours, plus Epic's live in-game news).
+- 🗺️ **Interactive map.** The current season's island with chests, rare chests, vaults, NPCs, vehicles, ziplines, fishing spots and 30+ more layers. Pan, zoom, search locations, click any marker for details (map, icons and data from [Fortnite.GG](https://fortnite.gg/), refreshed daily).
+- 🔫 **Weapon & item stats.** The current loot pool with damage, DPS, fire rate, reload, recoil, falloff and spawn chances for every rarity, plus all 476 weapons ever (data from [Fortnite.GG](https://fortnite.gg/weapons), refreshed daily).
 - 🔗 **One click to fortnite.com.** "Open in Epic Store" takes you straight to the item's official page on fortnite.com.
 - 💾 **Offline icon cache (desktop).** Icons are cached as tiny thumbnails, so the app gets faster every time you use it. One click downloads them all.
 - 🔒 **No account, no tracking.** No Epic login, no telemetry. Data comes from the public [fortnite-api.com](https://fortnite-api.com).
@@ -41,6 +45,36 @@ Looking up a Fortnite skin usually means ad-heavy sites, slow pages and endless 
 - Final and regular V-Bucks price, savings, discount banners and exactly when each offer leaves
 - Sidebar section list to jump through the shop, plus a live countdown to the next reset
 - Click any item inside a bundle to open it in the cosmetics browser
+
+## ✨ Sprite tracker
+
+<img src="docs/images/desktop-sprites.png" alt="Sprite tracker: Treasure Hunters sprites grouped by rarity with captured and mastered badges, variant dots, and Wayfinder's progress checklist in the detail panel" width="100%">
+
+- Every Sprite in the current season (Chapter 7 · Treasure Hunters) with its ability, rarity and resummon cost
+- Every sprite **and every variant** (**Fortune**, **Cursed**, **Gold**) is its own card with **Owned** and **Mastered** checkboxes, laid out like Fortnite.GG
+- Owned / Mastered counters, a Variant filter, sorting, and Missing / Owned / Mastered / Not mastered filters
+- Upcoming sprites and variants show their release date
+- Export your progress to JSON and import it on another PC or in the web demo
+
+Epic has no public Sprite API, so the list lives in [`docs/data/sprites.json`](docs/data/sprites.json). Both apps download it from the website, so new sprites, variants and seasons appear without an update. Spot a missing sprite? Edit that file in a pull request. Sprite pictures come from **[Fortnite.GG](https://fortnite.gg/sprites)** (used with permission) and load at runtime; nothing is bundled. The Fortnite Wiki is a fallback for sprites without a Fortnite.GG name, and the app draws a stand-in for versions that aren't out yet. You can also use your own photos: select a sprite, screenshot it in-game (`Win+Shift+S`), press `Ctrl+V`, or choose a file (works for each variant too). Epic's own Sprite news art shows in the detail panel. On desktop you can also drop pictures into `%LOCALAPPDATA%\FortniteCosmeticsBrowser\sprite_images\` as `<id>.png` or `<id>_<variant>.png` (for example `wayfinder_fortune.png`).
+
+## 🗺️ Interactive map
+
+<img src="docs/images/desktop-map.png" alt="Interactive Fortnite map: the Season 43 island with clustered chest markers, rare chests, vaults and named locations, with the layer list on the left and the map summary on the right" width="100%">
+
+- Every layer from Fortnite.GG's map: chests (gold outline = 100% spawn), rare and buried chests, vaults, sprite chests, ammo boxes, vending machines, launch pads, cannons, cars, boats, ziplines, Port-a-Potty tunnels, campfires, slurp, fishing, reboot vans, extraction sites and every NPC.
+- Turn layers on and off in the sidebar (your choice is remembered). Dense layers cluster with a count; click a cluster to zoom in.
+- Search a location (`Enter` jumps there), click a marker for its layer, nearest named place and position, or use "Only this layer".
+- Drag to pan, scroll or pinch to zoom, `+` / `-` / arrows / `0` on the keyboard. The web version updates the link (`#map/@x,y,zoom`) so you can share a view.
+
+## 📰 Fortnite news
+
+<img src="docs/images/desktop-news.png" alt="News tab: Epic's latest Fortnite news as image cards, 'In game now' stories first, then grouped by month, with a story and its cosmetic link in the detail panel" width="100%">
+
+- The latest ~60 official Fortnite news posts (about two months) with art, date, text and player votes.
+- **In game now** shows what Epic is running in the game today (live from Epic's news feed), so new stories appear before the archive refreshes.
+- "Check it out" links open the featured cosmetic right in the app; tournament and island links open on Fortnite.GG.
+- Why not scrape fortnite.com/news directly? It blocks all automated requests (Cloudflare) and its news API is switched off, so the app reads the same Epic posts from Fortnite.GG's archive and links to fortnite.com/news for the full site.
 
 ## 🌐 Live web demo
 
@@ -90,7 +124,9 @@ The exe lands in `dist/`.
 | Move selection | Arrow keys | Arrow keys |
 | Open full image | `Enter` / double-click | `Enter` / double-click |
 | Copy name / ID | Right-click a tile | Buttons in the detail panel |
-| Switch Cosmetics / Shop | `Ctrl+1` / `Ctrl+2` | Sidebar |
+| Switch Cosmetics / Shop / Sprites / Weapons / Map / News | `Ctrl+1` … `Ctrl+6` | Sidebar |
+| Map: zoom / pan / reset | `+` `-` / arrows / `0` | same |
+| Sprite card: Owned / Mastered | `Space` / `M` (or click the checkboxes) | `Space` / `M` (or click the checkboxes) |
 | Refresh data | `F5` | Reload page |
 
 ## ✨ Features at a glance
@@ -101,6 +137,10 @@ The exe lands in `dist/`.
 | Today's Item Shop with prices, discounts, timers | ✅ | ✅ |
 | "In shop" badges and item ↔ offer navigation | ✅ | ✅ |
 | Open items on fortnite.com | ✅ (in Chrome) | ✅ |
+| Sprite tracker (Owned / Mastered per sprite and variant) + JSON backup | ✅ | ✅ (saved in the browser) |
+| Weapon & item stats, falloff chart, spawn chances, all-weapons catalog | ✅ | ✅ |
+| Interactive map with 38 toggleable layers, clusters, location search | ✅ | ✅ |
+| Fortnite news (official posts, in game now, cosmetic links) | ✅ | ✅ |
 | S / M / L tile sizes (remembered) | ✅ | ✅ |
 | Shareable item links | | ✅ |
 | Offline thumbnail cache + "download all icons" | ✅ | |
@@ -120,6 +160,12 @@ The exe lands in `dist/`.
 fortnite_cosmetics_browser.pyw   Windows desktop app (Tkinter + Pillow, single file)
 docs/                            Web demo, served by GitHub Pages
   index.html, style.css, app.js  No framework, no build step
+  data/sprites.json              Sprite catalog (edit to add sprites, variants, seasons)
+  data/weapons.json              Weapon & item stats (generated by tools/scrape_fortnitegg.py, refreshed daily)
+  data/map.json                  Map layers and markers (generated by tools/scrape_fortnitegg.py, refreshed daily)
+  data/news.json                 Fortnite news archive (generated by tools/scrape_fortnitegg.py, refreshed every 3 h)
+  map.js                         Web map engine (canvas, no dependencies)
+tools/scrape_fortnitegg.py       Scraper for weapon/item stats and the map (Fortnite.GG)
 assets/icon.ico                  App icon for the exe
 .github/workflows/               CI checks and the release build
 ```
@@ -133,6 +179,7 @@ If this project is useful to you, **please ⭐ star the repo**. It helps other p
 ## 📄 License and credits
 
 - Code released under the [MIT License](LICENSE). © 2026 [248Tech](https://248tech.com).
+- Visual style, sprite images, weapon/item stats, the map (tiles, icons, markers) and the news archive courtesy of [Fortnite.GG](https://fortnite.gg). News text and art are Epic Games'.
 - Cosmetic data and images: [fortnite-api.com](https://fortnite-api.com).
 
 > **Disclaimer:** Fortnite is a trademark of Epic Games, Inc. This project is not affiliated with, endorsed, sponsored or approved by Epic Games. All Fortnite names, images and other game assets belong to Epic Games, Inc.

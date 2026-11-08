@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Fortnite Cosmetics Browser &amp; Item Shop Viewer - Free &amp; Open Source | 248Tech</title>
-  <meta name="description" content="Browse every Fortnite cosmetic (16,000+ skins, outfits, emotes, pickaxes, gliders, wraps and kicks) and today's Fortnite Item Shop with V-Bucks prices. Free, open source, no login. Live web demo plus a Windows desktop app by 248Tech.">
-  <meta name="keywords" content="Fortnite cosmetics, Fortnite skins, Fortnite item shop, Fortnite shop today, Fortnite locker, all Fortnite skins, Fortnite emotes, Fortnite pickaxes, Fortnite skin viewer, fortnite-api, open source, 248Tech">
+  <meta name="description" content="Browse every Fortnite cosmetic (16,000+ skins, outfits, emotes, pickaxes, gliders, wraps and kicks), today's Fortnite Item Shop with V-Bucks prices, and track your Sprites (captured, mastered, Fortune variants). Free, open source, no login. By 248Tech.">
+  <meta name="keywords" content="Fortnite cosmetics, Fortnite skins, Fortnite item shop, Fortnite shop today, Fortnite locker, all Fortnite skins, Fortnite emotes, Fortnite pickaxes, Fortnite skin viewer, Fortnite sprites, sprite tracker, Fortnite sprite checklist, fortnite-api, open source, 248Tech">
   <meta name="author" content="248Tech">
   <meta name="robots" content="index, follow, max-image-preview:large">
-  <meta name="theme-color" content="#121318">
+  <meta name="theme-color" content="#202225">
   <link rel="canonical" href="https://248tech.github.io/fortnite-cosmetics-browser/">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="images/icon-256.png">
@@ -56,6 +56,10 @@
     <nav class="nav">
       <button class="nav-item" data-mode="browse">Cosmetics <span class="nav-meta" id="browseCount"></span></button>
       <button class="nav-item" data-mode="shop">Item Shop <span class="nav-meta" id="shopCountdown"></span></button>
+      <button class="nav-item" data-mode="sprites">Sprites <span class="nav-meta" id="spriteCount"></span></button>
+      <button class="nav-item" data-mode="weapons">Weapons &amp; Items <span class="nav-meta" id="weaponCount"></span></button>
+      <button class="nav-item" data-mode="map">Map <span class="nav-meta" id="mapCount"></span></button>
+      <button class="nav-item" data-mode="news">News <span class="nav-meta" id="newsCount"></span></button>
     </nav>
     <div class="side-heading" id="sideHeading">Categories</div>
     <div class="side-list" id="sideList"></div>
@@ -86,6 +90,14 @@
         <select id="rarity" aria-label="Rarity"><option>All rarities</option></select>
         <select id="sort" aria-label="Sort"></select>
       </div>
+      <div class="browse-tools sprite-tools" id="spriteTools" style="display:none">
+        <select id="spriteVariant" aria-label="Variant"><option value="All">All variants</option></select>
+        <select id="spriteSort" aria-label="Sort sprites"></select>
+      </div>
+      <div class="browse-tools weapon-tools" id="weaponTools" style="display:none">
+        <select id="weaponPool" aria-label="Weapon pool"></select>
+        <select id="weaponSort" aria-label="Sort weapons"></select>
+      </div>
       <div class="seg" id="sizeSeg" role="group" aria-label="Tile size">
         <button data-size="S">S</button><button data-size="M">M</button><button data-size="L">L</button>
       </div>
@@ -95,6 +107,26 @@
       </a>
     </header>
 
+    <section class="sprite-hero" id="spriteHero" hidden>
+      <div class="hero-box">
+        <h1 class="display" id="heroTitle">Sprites</h1>
+        <div class="hero-stats">
+          <div class="hero-stat"><b id="heroOwned">0 / 0</b><span>Owned</span></div>
+          <div class="hero-stat"><b id="heroMastered">0 / 0</b><span>Mastered</span></div>
+        </div>
+      </div>
+      <div class="hero-chips" id="heroChips"></div>
+    </section>
+
+    <div class="map-wrap" id="mapWrap" hidden>
+      <div class="map-empty" id="mapEmpty"></div>
+      <div class="map-tip" id="mapTip" hidden></div>
+      <div class="map-ctrl" role="group" aria-label="Map zoom">
+        <button type="button" data-z="1" aria-label="Zoom in">+</button>
+        <button type="button" data-z="-1" aria-label="Zoom out">&minus;</button>
+        <button type="button" data-z="0" aria-label="Reset view">&#x2922;</button>
+      </div>
+    </div>
     <div class="grid-wrap" id="gridWrap" tabindex="0" aria-label="Cosmetics grid">
       <div class="grid-inner" id="gridInner"></div>
       <div class="empty" id="empty">
@@ -122,6 +154,10 @@
         <li>Instant search across names, sets and IDs</li>
         <li>Live Item Shop with countdown to the daily reset</li>
         <li>"In shop" badges and one-click links to fortnite.com</li>
+        <li>Latest Fortnite news: Epic's official news posts with images, what's live in game now, and links to the featured cosmetics</li>
+        <li>Interactive Fortnite map with chests, vaults, NPCs, vehicles and more (map, icons and data by Fortnite.GG)</li>
+        <li>Weapon &amp; item stats for the current loot pool: damage, DPS, fire rate, reload, falloff and spawn rates (data by Fortnite.GG)</li>
+        <li>Sprite tracker: Owned / Mastered for every Sprite and its Fortune, Cursed and Gold versions (images by Fortnite.GG)</li>
         <li>Keyboard friendly: <kbd>/</kbd> search, arrow keys, <kbd>Enter</kbd></li>
       </ul>
       <p>This page is the live demo of the <strong>Fortnite Cosmetics Browser</strong> desktop app for Windows, built by <a href="https://248tech.com" rel="noopener">248Tech</a>. The desktop version adds an offline icon cache, CSV export and native performance.</p>
@@ -136,6 +172,7 @@
 </div>
 <div class="toast" id="toast" role="status"></div>
 <noscript><p style="padding:24px;color:#fff">The Fortnite Cosmetics Browser needs JavaScript to load cosmetic data.</p></noscript>
+<script src="map.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
