@@ -2,7 +2,21 @@
 
 All notable changes to this project are documented here. This project follows [Semantic Versioning](https://semver.org/).
 
-## [1.1.0] - Unreleased
+## [Unreleased]
+
+## [1.2.0] - 2026-11-09
+
+### Added
+- **Stats tab** (desktop and web): look up any Epic, Xbox or PlayStation player for the current season in 8 modes (All, Battle Royale, Blitz, OG, Reload, Ranked, Ranked Reload, Arenas Boxfights): wins, win rate, matches, K/D, kills per match, kills, time played, average match, level, and rank with progress for Ranked / Arenas. **Track** players (sidebar + header), recent searches, and **progress since your last check** with a wins/kills trend from saved lookups. `Ctrl+8`; web route `#stats/<mode>/<name>[@xbl|@psn]`
+- **Season leaderboards**: 25 boards (level, wins, kills, time, rank per mode), top 40 each; click a name to look them up. `tools/scrape_fortnitegg.py --only stats` builds `docs/data/stats.json`; the data Action refreshes it every 3 hours
+- Player lookups use Fortnite.GG's stats JSON (`/stats[/<mode>]?player=<name>&ajax`). The desktop app calls it directly; browsers block it from the web demo until Fortnite.GG sends a CORS header, so the web page explains that and links to the player on Fortnite.GG
+- **Locker tab** (desktop and web): every outfit, emote, back bling, pickaxe, glider, sidekick, kicks, wrap, contrail, aura, emoticon, spray and loading screen from [Fortnite.GG](https://fortnite.gg/cosmetics) (15,744 items, 13 type chips) with in-game **showcase videos**, grouped by season (newest first), NEW / IN SHOP badges, and filters that adapt to the type (This season, In the shop now, Dances, Traversal, Synced, Built-in, With styles, Reactive, Animated, Unreleased). Sort by newest, oldest, name or rarity. `Ctrl+7`; web routes `#locker/<type>/<id>` (old `#emotes/<id>` links still work)
+- **Showcase player:** play/pause, seek, `HD` (remembered), `0.5×` speed, sound and full screen (web). Web cards play a muted preview on hover (toggle with **Previews**). Desktop decodes the clip in the app with PyAV and plays its sound in sync through Windows' built-in `winsound` (no extra dependency): sound follows play/pause, loops, and `0.5×` (slow-motion pitch), with a remembered **Sound on/off** switch; silent clips show "No sound". Sprays and loading screens show their full-size art. Without PyAV, clips open in the browser
+- Items in the **Cosmetics** tab play their showcase video too (each type's data loads on demand), with "Open in Locker"
+- `tools/scrape_fortnitegg.py --only locker` builds `docs/data/locker/index.json` plus one file per type from Fortnite.GG's item list, and matches items to Epic ids (fortnite-api.com) by type, name and release date (15,716 / 15,744 matched). The daily data Action refreshes it. Clips stream from Fortnite.GG's CDN (`video-sd.mp4` ~1-2 MB, `video.mp4` HD); nothing is bundled
+- Desktop dependency: `av` (PyAV) is now in `requirements.txt` and in the release exe (the exe grows from ~19 MB to ~47 MB)
+
+## [1.1.0] - 2026-11-08
 
 ### Changed
 - **New look:** both apps use the Fortnite.GG visual style. Dark grey surfaces (`#2f3136` / `#202225`), yellow accent (`#fce51e`), green owned and red locked states, and condensed uppercase headings (Bahnschrift; the site's Burbank font is licensed and not bundled)
@@ -47,5 +61,7 @@ First public release by [248Tech](https://248tech.com).
 - Static web version in `docs/`, served by GitHub Pages, with the same search, filters, shop view and fortnite.com links
 - Mobile layout, shareable `#item/<id>` and `#shop/<offerId>` links
 
-[1.1.0]: https://github.com/248Tech/fortnite-cosmetics-browser/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/248Tech/fortnite-cosmetics-browser/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/248Tech/fortnite-cosmetics-browser/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/248Tech/fortnite-cosmetics-browser/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/248Tech/fortnite-cosmetics-browser/releases/tag/v1.0.0

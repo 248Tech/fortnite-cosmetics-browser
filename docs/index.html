@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Fortnite Cosmetics Browser &amp; Item Shop Viewer - Free &amp; Open Source | 248Tech</title>
-  <meta name="description" content="Browse every Fortnite cosmetic (16,000+ skins, outfits, emotes, pickaxes, gliders, wraps and kicks), today's Fortnite Item Shop with V-Bucks prices, and track your Sprites (captured, mastered, Fortune variants). Free, open source, no login. By 248Tech.">
-  <meta name="keywords" content="Fortnite cosmetics, Fortnite skins, Fortnite item shop, Fortnite shop today, Fortnite locker, all Fortnite skins, Fortnite emotes, Fortnite pickaxes, Fortnite skin viewer, Fortnite sprites, sprite tracker, Fortnite sprite checklist, fortnite-api, open source, 248Tech">
+  <title>Fortnite Locker, Item Shop &amp; Player Stats - Cosmetics Browser | 248Tech</title>
+  <meta name="description" content="Every Fortnite skin, emote, pickaxe, glider, back bling and wrap with in-game showcase videos, today's Item Shop with V-Bucks prices, player stats and leaderboards, the interactive map, weapon stats and a Sprite tracker. Free, open source, no login. By 248Tech.">
+  <meta name="keywords" content="Fortnite cosmetics, Fortnite skins, Fortnite item shop, Fortnite shop today, Fortnite locker, all Fortnite skins, Fortnite emotes, Fortnite emote previews, Fortnite pickaxes, Fortnite gliders, Fortnite skin viewer, Fortnite showcase videos, Fortnite stats, Fortnite stats tracker, Fortnite leaderboards, Fortnite K/D, Fortnite map, Fortnite weapon stats, Fortnite news, Fortnite sprites, sprite tracker, Fortnite sprite checklist, fortnite-api, open source, 248Tech">
   <meta name="author" content="248Tech">
   <meta name="robots" content="index, follow, max-image-preview:large">
   <meta name="theme-color" content="#202225">
@@ -15,15 +15,15 @@
 
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="248Tech">
-  <meta property="og:title" content="Fortnite Cosmetics Browser & Item Shop Viewer by 248Tech">
-  <meta property="og:description" content="Search all 16,000+ Fortnite cosmetics and today's Item Shop. Free and open source, with a Windows desktop app.">
+  <meta property="og:title" content="Fortnite Locker, Item Shop & Player Stats by 248Tech">
+  <meta property="og:description" content="Watch the showcase video of every Fortnite skin, emote and pickaxe, check today's Item Shop, and look up player stats. Free and open source, with a Windows desktop app.">
   <meta property="og:url" content="https://248tech.github.io/fortnite-cosmetics-browser/">
   <meta property="og:image" content="https://248tech.github.io/fortnite-cosmetics-browser/images/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Fortnite Cosmetics Browser & Item Shop Viewer by 248Tech">
-  <meta name="twitter:description" content="Search all 16,000+ Fortnite cosmetics and today's Item Shop. Free and open source.">
+  <meta name="twitter:title" content="Fortnite Locker, Item Shop & Player Stats by 248Tech">
+  <meta name="twitter:description" content="Showcase videos for every Fortnite cosmetic, today's Item Shop and player stats. Free and open source.">
   <meta name="twitter:image" content="https://248tech.github.io/fortnite-cosmetics-browser/images/og-image.png">
 
   <script type="application/ld+json">
@@ -31,7 +31,9 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Fortnite Cosmetics Browser",
-    "description": "Free, open-source browser for every Fortnite cosmetic and the daily Fortnite Item Shop. Available as a web app and a Windows desktop app.",
+    "description": "Free, open-source browser for every Fortnite cosmetic with in-game showcase videos, the daily Fortnite Item Shop, player stats and leaderboards, the interactive map, weapon stats, news and a Sprite tracker. Available as a web app and a Windows desktop app.",
+    "softwareVersion": "1.2.0",
+    "featureList": ["Locker with showcase videos for 15,700+ outfits, emotes, pickaxes, gliders and more", "Daily Item Shop with V-Bucks prices", "Player stats, tracked players and season leaderboards", "Interactive Fortnite map", "Weapon and item stats", "Fortnite news", "Sprite collection tracker"],
     "applicationCategory": "GameApplication",
     "operatingSystem": "Windows 10, Windows 11, Web",
     "url": "https://248tech.github.io/fortnite-cosmetics-browser/",
@@ -60,6 +62,8 @@
       <button class="nav-item" data-mode="weapons">Weapons &amp; Items <span class="nav-meta" id="weaponCount"></span></button>
       <button class="nav-item" data-mode="map">Map <span class="nav-meta" id="mapCount"></span></button>
       <button class="nav-item" data-mode="news">News <span class="nav-meta" id="newsCount"></span></button>
+      <button class="nav-item" data-mode="locker">Locker <span class="nav-meta" id="lockerCount"></span></button>
+      <button class="nav-item" data-mode="stats">Stats <span class="nav-meta" id="statsCount"></span></button>
     </nav>
     <div class="side-heading" id="sideHeading">Categories</div>
     <div class="side-list" id="sideList"></div>
@@ -98,6 +102,14 @@
         <select id="weaponPool" aria-label="Weapon pool"></select>
         <select id="weaponSort" aria-label="Sort weapons"></select>
       </div>
+      <div class="browse-tools stats-tools" id="statsTools" style="display:none">
+        <select id="statsPlatform" aria-label="Platform"><option value="epic">Epic</option><option value="xbl">Xbox</option><option value="psn">PlayStation</option></select>
+        <button type="button" class="btn btn-accent" id="statsGo">Look up</button>
+      </div>
+      <div class="browse-tools locker-tools" id="lockerTools" style="display:none">
+        <select id="lockerSort" aria-label="Sort the locker"></select>
+        <button type="button" class="chip-toggle" id="lockerPreview" aria-label="Toggle hover previews">&#9654; Previews</button>
+      </div>
       <div class="seg" id="sizeSeg" role="group" aria-label="Tile size">
         <button data-size="S">S</button><button data-size="M">M</button><button data-size="L">L</button>
       </div>
@@ -117,6 +129,10 @@
       </div>
       <div class="hero-chips" id="heroChips"></div>
     </section>
+
+    <nav class="locker-bar" id="lockerBar" aria-label="Locker item types" hidden></nav>
+
+    <div class="stats-wrap" id="statsWrap" hidden></div>
 
     <div class="map-wrap" id="mapWrap" hidden>
       <div class="map-empty" id="mapEmpty"></div>
@@ -154,6 +170,8 @@
         <li>Instant search across names, sets and IDs</li>
         <li>Live Item Shop with countdown to the daily reset</li>
         <li>"In shop" badges and one-click links to fortnite.com</li>
+        <li>Player stats tracker: season wins, win rate, K/D, kills, time played and Ranked / Arena rank for any Epic, Xbox or PlayStation name, progress since your last check, and leaderboards for every mode (data by Fortnite.GG)</li>
+        <li>Locker: every outfit, emote, back bling, pickaxe, glider, sidekick, kicks, wrap, contrail, aura, emoticon, spray and loading screen with its in-game showcase video. Hover a card to preview, then play it in HD with sound; showcase videos by Fortnite.GG</li>
         <li>Latest Fortnite news: Epic's official news posts with images, what's live in game now, and links to the featured cosmetics</li>
         <li>Interactive Fortnite map with chests, vaults, NPCs, vehicles and more (map, icons and data by Fortnite.GG)</li>
         <li>Weapon &amp; item stats for the current loot pool: damage, DPS, fire rate, reload, falloff and spawn rates (data by Fortnite.GG)</li>

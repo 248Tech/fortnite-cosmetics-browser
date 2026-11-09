@@ -4,8 +4,8 @@
 
 # Fortnite Cosmetics Browser
 
-**Every Fortnite cosmetic, today's Item Shop and a Sprite collection tracker in one fast, beautiful app.**
-Search all 16,000+ skins, emotes, pickaxes, gliders, wraps and kicks, check today's shop with V-Bucks prices, and jump straight to any item on fortnite.com. Free, open source, no login.
+**Every Fortnite cosmetic with its showcase video, today's Item Shop, player stats and a Sprite tracker in one fast, beautiful app.**
+Search all 16,000+ skins, emotes, pickaxes, gliders, wraps and kicks, watch each one's in-game showcase, check today's shop with V-Bucks prices, look up any player's season stats, and jump straight to any item on fortnite.com. Free, open source, no login.
 
 [![Live demo](https://img.shields.io/badge/Live%20demo-Open%20in%20browser-4f8cff?style=for-the-badge&logo=googlechrome&logoColor=white)](https://248tech.github.io/fortnite-cosmetics-browser/)
 [![Download](https://img.shields.io/github/v/release/248Tech/fortnite-cosmetics-browser?label=Download%20for%20Windows&style=for-the-badge&color=9645d6&logo=windows&logoColor=white)](https://github.com/248Tech/fortnite-cosmetics-browser/releases/latest)
@@ -29,6 +29,8 @@ Looking up a Fortnite skin usually means ad-heavy sites, slow pages and endless 
 - 🛒 **Today's Item Shop, live.** Every offer grouped into its shop section, with V-Bucks prices, discounts, "leaves in" timers and a countdown to the daily reset.
 - 🏷️ **"In shop" badges everywhere.** Spot which cosmetics you can buy today, then jump from an item to its offer and from a bundle to every item inside it.
 - ✨ **Sprite tracker.** Every Sprite and every Fortune, Cursed and Gold version as its own card with Owned and Mastered checkboxes, using official sprite images from [Fortnite.GG](https://fortnite.gg/sprites).
+- 👑 **Player stats.** Look up any Epic, Xbox or PlayStation name for season wins, win rate, K/D, kills per match, time played and Ranked / Arena rank in 8 modes, track players, see progress since your last check, and browse 25 season leaderboards (data from [Fortnite.GG](https://fortnite.gg/stats)).
+- 🎒 **Locker with showcase videos.** Every outfit, emote, back bling, pickaxe, glider, sidekick, kicks, wrap, contrail, aura, emoticon, spray and loading screen (15,700+) with its in-game showcase video: hover a card to preview (web), click to play in HD with sound, grouped by season with NEW / IN SHOP badges and per-type filters (showcase videos from [Fortnite.GG](https://fortnite.gg/cosmetics)).
 - 📰 **Fortnite news.** Epic's official news posts with images, what's in game right now, links straight to the featured cosmetics, grouped by month and searchable (archive from [Fortnite.GG](https://fortnite.gg/news) refreshed every 3 hours, plus Epic's live in-game news).
 - 🗺️ **Interactive map.** The current season's island with chests, rare chests, vaults, NPCs, vehicles, ziplines, fishing spots and 30+ more layers. Pan, zoom, search locations, click any marker for details (map, icons and data from [Fortnite.GG](https://fortnite.gg/), refreshed daily).
 - 🔫 **Weapon & item stats.** The current loot pool with damage, DPS, fire rate, reload, recoil, falloff and spawn chances for every rarity, plus all 476 weapons ever (data from [Fortnite.GG](https://fortnite.gg/weapons), refreshed daily).
@@ -76,6 +78,26 @@ Epic has no public Sprite API, so the list lives in [`docs/data/sprites.json`](d
 - "Check it out" links open the featured cosmetic right in the app; tournament and island links open on Fortnite.GG.
 - Why not scrape fortnite.com/news directly? It blocks all automated requests (Cloudflare) and its news API is switched off, so the app reads the same Epic posts from Fortnite.GG's archive and links to fortnite.com/news for the full site.
 
+## 👑 Stats
+
+<img src="docs/images/desktop-stats.png" alt="Stats tab: a player's season wins, win rate, K/D, kills, time played and level, with mode chips and the season leaderboards below" width="100%">
+
+- Type a player name in the search box and press `Enter` (pick Xbox or PlayStation for console names). Mode chips switch between All modes, Battle Royale, Blitz, OG, Reload, Ranked, Ranked Reload and Arenas Boxfights.
+- Stat tiles: wins, win rate, matches, K/D, kills per match, kills, time played, average match length and level, plus the rank badge and progress to the next rank in Ranked and Arenas. Same formulas as Fortnite.GG's stats card.
+- Every lookup is saved so the card shows **progress since your last check** (`+3 wins · +40 kills ...`) with a wins/kills trend line. **☆ Track** pins a player to the sidebar and the stats header; recent searches are listed too.
+- Season leaderboards (top 40) for level, wins, kills, time and rank in every mode, refreshed every 3 hours. Click any name to look them up.
+- Desktop saves this in `%LOCALAPPDATA%\FortniteCosmeticsBrowser\stats_players.json`, web in the browser.
+- **Web demo note:** Fortnite.GG's stats API doesn't send a CORS header yet, so browsers block player lookups from this site. Leaderboards work, and the page links to the player on Fortnite.GG. Lookups work fully in the desktop app. Adding `Access-Control-Allow-Origin: https://248tech.github.io` to `fortnite.gg/stats…&ajax` responses would turn them on in the web demo with no code change.
+
+## 🎒 Locker
+
+<img src="docs/images/desktop-locker.png" alt="Locker tab: type chips for outfits, emotes, back blings, pickaxes and more, outfits grouped by season with NEW and IN SHOP badges, and the selected outfit's showcase video playing in the detail panel" width="100%">
+
+- 13 types, each a chip at the top: **Outfits** (2,841), **Emotes** (1,771), **Back Blings**, **Pickaxes**, **Gliders**, **Sidekicks**, **Kicks**, **Wraps**, **Contrails**, **Auras**, **Emoticons**, **Sprays** and **Loading Screens**. Newest season first, with rarity, set, source, price and when it was last in the shop.
+- **Showcase videos:** the web demo plays a muted preview when you hover a card; selecting an item plays its in-game showcase in the detail panel with play/pause, seek, `HD`, `0.5×` speed, sound and full screen. Sprays and loading screens show their full-size art instead. Items in the **Cosmetics** tab play their showcase too, with a jump to the Locker.
+- Desktop plays the showcase right in the app (decoded with [PyAV](https://pyav.basswood-io.com/)) with its sound through Windows' built-in player, `HD`, `0.5×` slow motion and a remembered **Sound on/off** switch; clips that are silent show "No sound". Clips are cached in `%LOCALAPPDATA%\FortniteCosmeticsBrowser\clips\` (newest 150 kept).
+- Filters adapt to the type: This season, In the shop now, Dances / Traversal / Synced (emotes), Built-in, With styles, Reactive, Animated, Unreleased. Sorts: newest, oldest, name, rarity. Web links: `#locker/<type>/<id>`.
+
 ## 🌐 Live web demo
 
 **Try it now: [248tech.github.io/fortnite-cosmetics-browser](https://248tech.github.io/fortnite-cosmetics-browser/)**
@@ -104,12 +126,12 @@ pip install -r requirements.txt
 python fortnite_cosmetics_browser.pyw
 ```
 
-On Windows you can also double-click **`Launch Fortnite Cosmetics Browser.bat`**, which installs Pillow if needed and starts the app without a console window.
+On Windows you can also double-click **`Launch Fortnite Cosmetics Browser.bat`**, which installs Pillow and PyAV if needed and starts the app without a console window.
 
 ### Build the exe yourself
 
 ```bash
-pip install pillow pyinstaller
+pip install pillow av pyinstaller
 pyinstaller --onefile --windowed --name FortniteCosmeticsBrowser --icon assets/icon.ico fortnite_cosmetics_browser.pyw
 ```
 
@@ -124,7 +146,9 @@ The exe lands in `dist/`.
 | Move selection | Arrow keys | Arrow keys |
 | Open full image | `Enter` / double-click | `Enter` / double-click |
 | Copy name / ID | Right-click a tile | Buttons in the detail panel |
-| Switch Cosmetics / Shop / Sprites / Weapons / Map / News | `Ctrl+1` … `Ctrl+6` | Sidebar |
+| Switch Cosmetics / Shop / Sprites / Weapons / Map / News / Locker / Stats | `Ctrl+1` … `Ctrl+8` | Sidebar |
+| Stats: look up the typed player | `Enter` in the search box | `Enter` in the search box |
+| Locker: play / pause showcase | `Space` / `Enter` / double-click | `Space` (`Enter` opens Fortnite.GG) |
 | Map: zoom / pan / reset | `+` `-` / arrows / `0` | same |
 | Sprite card: Owned / Mastered | `Space` / `M` (or click the checkboxes) | `Space` / `M` (or click the checkboxes) |
 | Refresh data | `F5` | Reload page |
@@ -141,6 +165,8 @@ The exe lands in `dist/`.
 | Weapon & item stats, falloff chart, spawn chances, all-weapons catalog | ✅ | ✅ |
 | Interactive map with 38 toggleable layers, clusters, location search | ✅ | ✅ |
 | Fortnite news (official posts, in game now, cosmetic links) | ✅ | ✅ |
+| Locker: 13 cosmetic types with showcase videos (HD, speed, sound) | ✅ | ✅ (+ hover previews) |
+| Player stats, tracking, progress, season leaderboards | ✅ | ✅ leaderboards (player lookups need Fortnite.GG CORS) |
 | S / M / L tile sizes (remembered) | ✅ | ✅ |
 | Shareable item links | | ✅ |
 | Offline thumbnail cache + "download all icons" | ✅ | |
@@ -164,8 +190,10 @@ docs/                            Web demo, served by GitHub Pages
   data/weapons.json              Weapon & item stats (generated by tools/scrape_fortnitegg.py, refreshed daily)
   data/map.json                  Map layers and markers (generated by tools/scrape_fortnitegg.py, refreshed daily)
   data/news.json                 Fortnite news archive (generated by tools/scrape_fortnitegg.py, refreshed every 3 h)
+  data/locker/                   index.json + one file per cosmetic type with Fortnite.GG clip ids (generated by tools/scrape_fortnitegg.py, refreshed daily)
+  data/stats.json                Season leaderboards for every stats mode (generated by tools/scrape_fortnitegg.py, refreshed every 3 h)
   map.js                         Web map engine (canvas, no dependencies)
-tools/scrape_fortnitegg.py       Scraper for weapon/item stats and the map (Fortnite.GG)
+tools/scrape_fortnitegg.py       Scraper for weapon/item stats, the map, news, the locker and stats leaderboards (Fortnite.GG)
 assets/icon.ico                  App icon for the exe
 .github/workflows/               CI checks and the release build
 ```
@@ -179,7 +207,7 @@ If this project is useful to you, **please ⭐ star the repo**. It helps other p
 ## 📄 License and credits
 
 - Code released under the [MIT License](LICENSE). © 2026 [248Tech](https://248tech.com).
-- Visual style, sprite images, weapon/item stats, the map (tiles, icons, markers) and the news archive courtesy of [Fortnite.GG](https://fortnite.gg). News text and art are Epic Games'.
+- Visual style, sprite images, weapon/item stats, the map (tiles, icons, markers), the news archive, the locker showcase videos and player stats / leaderboards courtesy of [Fortnite.GG](https://fortnite.gg). News text and art are Epic Games'.
 - Cosmetic data and images: [fortnite-api.com](https://fortnite-api.com).
 
 > **Disclaimer:** Fortnite is a trademark of Epic Games, Inc. This project is not affiliated with, endorsed, sponsored or approved by Epic Games. All Fortnite names, images and other game assets belong to Epic Games, Inc.

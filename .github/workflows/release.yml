@@ -17,9 +17,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install build tools
-        run: python -m pip install --upgrade pip pillow pyinstaller
+        run: python -m pip install --upgrade pip pillow av pyinstaller
       - name: Build exe
-        run: pyinstaller --noconfirm --onefile --windowed --name FortniteCosmeticsBrowser --icon assets/icon.ico --add-data "docs/data/sprites.json;." --add-data "docs/data/weapons.json;." --add-data "docs/data/map.json;." --add-data "docs/data/news.json;." fortnite_cosmetics_browser.pyw
+        run: pyinstaller --noconfirm --onefile --windowed --name FortniteCosmeticsBrowser --icon assets/icon.ico --add-data "docs/data/sprites.json;." --add-data "docs/data/weapons.json;." --add-data "docs/data/map.json;." --add-data "docs/data/news.json;." --add-data "docs/data/locker;locker" --add-data "docs/data/stats.json;." fortnite_cosmetics_browser.pyw
       - name: Zip portable build
         shell: pwsh
         run: Compress-Archive -Path dist/FortniteCosmeticsBrowser.exe, LICENSE, README.md -DestinationPath "dist/FortniteCosmeticsBrowser-${{ github.ref_name }}-windows-x64.zip"

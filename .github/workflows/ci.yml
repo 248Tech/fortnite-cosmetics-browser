@@ -24,6 +24,11 @@ jobs:
           python -c "import json; d = json.load(open('docs/data/weapons.json', encoding='utf-8')); assert d['schema'] == 1 and d['lootPool'] and d['catalog']; print('weapons.json OK:', len(d['lootPool']), 'loot pool,', len(d['catalog']), 'catalog')"
           python -c "import json; d = json.load(open('docs/data/map.json', encoding='utf-8')); L = [l for g in d['groups'] for l in g['layers']]; assert d['schema'] == 1 and d['tiles'] and L and all(l['kind'] in ('markers', 'labels', 'lines', 'tunnels') for l in L); print('map.json OK: season', d['season'], len(L), 'layers')"
           python -c "import json; d = json.load(open('docs/data/news.json', encoding='utf-8')); assert d['schema'] == 1 and d['items'] and all(i['title'] for i in d['items']); print('news.json OK:', len(d['items']), 'stories')"
+          python -c "import json; ix = json.load(open('docs/data/locker/index.json', encoding='utf-8')); assert ix['schema'] == 1 and '{g}' in ix['video'] and len(ix['types']) >= 10; n = 0
+          for t in ix['types']:
+              d = json.load(open('docs/data/locker/' + t['file'], encoding='utf-8')); assert d['schema'] == 1 and d['type'] == t['id'] and len(d['items']) == t['count'] and all(i['g'] and i['name'] for i in d['items']); n += t['count']
+          print('locker OK:', len(ix['types']), 'types,', n, 'items')"
+          python -c "import json; d = json.load(open('docs/data/stats.json', encoding='utf-8')); assert d['schema'] == 1 and d['boards'] and d['modes'] and '{name}' in d['playerApi'] and all(b['rows'] for b in d['boards']); print('stats.json OK:', len(d['boards']), 'leaderboards')"
       - name: Validate Sprite catalog
         run: |
           python - <<'EOF'

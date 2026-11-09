@@ -35,6 +35,8 @@
     status: $('#status'), detail: $('#detail'), detailBody: $('#detailBody'), about: $('#about'),
     toast: $('#toast'), spriteTools: $('#spriteTools'), spriteVariant: $('#spriteVariant'), spriteSort: $('#spriteSort'),
     weaponTools: $('#weaponTools'), weaponPool: $('#weaponPool'), weaponSort: $('#weaponSort'),
+    statsWrap: $('#statsWrap'), statsTools: $('#statsTools'), statsPlatform: $('#statsPlatform'), statsGo: $('#statsGo'),
+    lockerTools: $('#lockerTools'), lockerSort: $('#lockerSort'), lockerPreview: $('#lockerPreview'), lockerBar: $('#lockerBar'),
     mapWrap: $('#mapWrap'), mapTip: $('#mapTip'), mapEmpty: $('#mapEmpty'),
     hero: $('#spriteHero'), heroTitle: $('#heroTitle'), heroOwned: $('#heroOwned'), heroMastered: $('#heroMastered'), heroChips: $('#heroChips'),
   };
@@ -47,8 +49,10 @@
   const state = {
     mode: 'browse',
     items: [], byId: new Map(), cats: [], cat: 'All', rarity: 'All', sort: 'Newest',
-    search: { browse: '', shop: '', sprites: '', weapons: '', map: '', news: '' },
+    search: { browse: '', shop: '', sprites: '', weapons: '', map: '', news: '', locker: '', stats: '' },
     news: null, newsError: null,
+    locker: null, lockerError: null, lockerType: 'outfit', lockerFilter: 'All', lockerSort: 'Newest',
+    stats: null, statsError: null, statsMode: 'all', statsPlatform: 'epic', statsPlayer: null, statsReq: null, statsOpen: new Set(),
     map: null, mapError: null, mapLayers: new Map(), mapOn: new Set(),
     weapons: null, weaponsError: null, weaponPool: 'Current loot pool', weaponSort: 'Class', weaponRarity: {},
     sprites: null, spritesError: null, spriteFilter: 'All', spriteSeason: null, spriteVariant: 'All', spriteSort: 'Default',
@@ -61,6 +65,8 @@
       weapons: { sections: [], flat: [], selected: null, scroll: 0 },
       map: { sections: [], flat: [], selected: null, scroll: 0 },
       news: { sections: [], flat: [], selected: null, scroll: 0 },
+      locker: { sections: [], flat: [], selected: null, scroll: 0 },
+      stats: { sections: [], flat: [], selected: null, scroll: 0 },
     },
     layout: { rows: [], rowY: [], pos: [], cols: 1, x0: 0, tile: 116, total: 0 },
     rendered: new Map(),
@@ -280,6 +286,7 @@
     if (state.mode === 'shop') buildSidebar();
     applyFilter('shop');
     if (state.mode === 'browse') render(true);
+    if (state.locker) applyFilter('locker');  // "In shop" pills + filter count
     tick();
     routeFromHash(true);
   }
@@ -287,6 +294,7 @@
   // ------------------------------------------------------------------ filtering
   function applyFilter(mode = state.mode) {
     if (mode === 'map') { if (state.mode === 'map') buildSidebar(); updateStatus(); return; }
+    if (mode === 'stats') { updateStatus(); return; }
     const g = state.grid[mode];
     const keepKey = g.selected != null && g.flat[g.selected] ? g.flat[g.selected].key : null;
     const terms = state.search[mode].toLowerCase().split(/\s+/).filter(Boolean);
@@ -313,6 +321,9 @@
     } else if (mode === 'news') {
       g.sections = newsSections(match);
       if (state.mode === 'news') buildSidebar();
+    } else if (mode === 'locker') {
+      g.sections = lockerSections(match);
+      if (state.mode === 'locker') buildSidebar();
     } else {
       g.sections = [];
       if (state.shop) {
@@ -341,6 +352,10 @@
       if (!state.items.length) return null;
       return 'No cosmetics match your filters.';
     }
+    if (state.mode === 'locker') {
+      if (state.lockerError && !state.locker) return `Couldn't load the locker.\n${state.lockerError.message}\nRefresh the page to try again.`;
+      return lockerType() ? 'Nothing matches.' : null;
+    }
     if (state.mode === 'news') {
       if (state.newsError && !state.news) return `Couldn't load the news.\n${state.newsError.message}\nRefresh the page to try again.`;
       return state.news ? 'No stories match.' : null;
@@ -367,7 +382,7 @@
   }
 
   function layout() {
-    if (state.mode === 'map') return;
+    if (state.mode === 'map' || state.mode === 'stats') return;
     const g = state.grid[state.mode];
     const w = Math.max(1, el.wrap.clientWidth);
     const tile = tileSize(w);
@@ -395,7 +410,7 @@
     const msg = g.flat.length ? '' : emptyMessage();
     el.empty.hidden = !!g.flat.length;
     el.empty.innerHTML = g.flat.length ? '' : msg == null
-      ? `<div class="spinner"></div><p>${{ browse: 'Loading 16,000+ Fortnite cosmetics...', shop: 'Loading the Item Shop...', sprites: 'Loading Sprites...', weapons: 'Loading weapons...', news: 'Loading Fortnite news...' }[state.mode]}</p>`
+      ? `<div class="spinner"></div><p>${{ browse: 'Loading 16,000+ Fortnite cosmetics...', shop: 'Loading the Item Shop...', sprites: 'Loading Sprites...', weapons: 'Loading weapons...', news: 'Loading Fortnite news...', locker: 'Loading the locker...' }[state.mode]}</p>`
       : `<p>${esc(msg)}</p>`;
     render(true);
   }
@@ -412,6 +427,7 @@
     const sel = state.grid[state.mode].selected === i ? ' sel' : '';
     if (state.mode === 'weapons') return weaponTileHTML(it, i, sel);
     if (state.mode === 'news') return newsTileHTML(it, i, sel);
+    if (state.mode === 'locker') return lockerTileHTML(it, i, sel);
     if (state.mode === 'sprites') {
       const t = spriteCardHTML(it);
       return `<div class="tile scard${sel}" data-i="${i}" style="left:${x}px;top:${y}px;width:${tile}px;height:${tile + cardTextH()}px">` +
@@ -437,7 +453,7 @@
   }
 
   function render(full = false) {
-    if (state.mode === 'map') return;
+    if (state.mode === 'map' || state.mode === 'stats') return;
     const L = state.layout, g = state.grid[state.mode];
     if (full) { el.inner.innerHTML = ''; state.rendered.clear(); }
     const top = el.wrap.scrollTop - OVERSCAN, bottom = el.wrap.scrollTop + el.wrap.clientHeight + OVERSCAN;
@@ -493,7 +509,7 @@
     const it = g.flat[i];
     showItem(it);
     if (open) document.body.classList.add('detail-open');
-    if (!fromRoute) setHash(state.mode === 'browse' ? `item/${it.id}` : state.mode === 'shop' ? `shop/${it.offerId}` : state.mode === 'weapons' ? `weapons/${it.slug}` : state.mode === 'news' ? `news/${it.id}` : `sprites/${it.sp.id}${it.v ? '~' + it.v : ''}`);
+    if (!fromRoute) setHash(state.mode === 'browse' ? `item/${it.id}` : state.mode === 'shop' ? `shop/${it.offerId}` : state.mode === 'weapons' ? `weapons/${it.slug}` : state.mode === 'news' ? `news/${it.id}` : state.mode === 'locker' ? `locker/${it.type}/${it.g}` : `sprites/${it.sp.id}${it.v ? '~' + it.v : ''}`);
   }
 
   function ensureVisible(i) {
@@ -522,6 +538,7 @@
     else if (state.mode === 'shop') showOffer(it);
     else if (state.mode === 'weapons') showWeapon(it);
     else if (state.mode === 'news') showNews(it);
+    else if (state.mode === 'locker') showLockerItem(it);
     else showSprite(it);
   }
   el.inner.addEventListener('dblclick', (e) => {
@@ -531,6 +548,7 @@
     if (state.mode === 'sprites') { if (!e.target.closest('[data-cw]')) toggleEntry(it, 'owned'); return; }
     if (state.mode === 'weapons') { window.open(fggWeapon(it.slug), '_blank', 'noopener'); return; }
     if (state.mode === 'news') { window.open(it.imageLarge || it.image, '_blank', 'noopener'); return; }
+    if (state.mode === 'locker') { const fs = el.detailBody.querySelector('[data-act="ep-full"]'); if (fs) fs.click(); else window.open(it.featured, '_blank', 'noopener'); return; }
     window.open(state.mode === 'browse' ? it.featured || it.icon : it.image, '_blank', 'noopener');
   });
 
@@ -558,19 +576,26 @@
     if (it.intro) facts.push(['Introduced', it.intro.replace('Introduced in ', '').replace(/\.$/, '')]);
     if (it.added) facts.push(['Added', it.added.slice(0, 10)]);
     facts.push(['ID', it.id]);
+    const em = state.locker && state.locker.byId.get(it.id.toLowerCase());
+    const lt = LOCKER_BACKEND[it.backend];
+    if (!em && lt && state.locker && !state.locker.types.has(lt)) {
+      ensureLockerType(lt).then((T) => { const g = state.grid.browse; if (T && state.mode === 'browse' && g.flat[g.selected] === it) showCosmetic(it); });
+    }
     setDetail(
-      `<a class="d-img" href="${esc(it.featured || it.icon)}" target="_blank" rel="noopener" style="background:${gradient(rarityBg(it.rarityKey))}">` +
-      `<img src="${esc(it.icon)}" alt="${esc(it.name)} - Fortnite ${esc(it.type)}"></a>` +
+      (em ? lockerMediaHTML(em) : `<a class="d-img" href="${esc(it.featured || it.icon)}" target="_blank" rel="noopener" style="background:${gradient(rarityBg(it.rarityKey))}">` +
+      `<img src="${esc(it.icon)}" alt="${esc(it.name)} - Fortnite ${esc(it.type)}"></a>`) +
       `<h2>${esc(it.name)}</h2>` +
       `<div class="badges"><span class="badge" style="background:${rarityColor(it.rarityKey)}">${esc(it.rarity)}</span><span class="badge">${esc(it.type)}</span></div>` +
       (offer ? `<button class="shop-link" data-act="goto-offer" data-key="${esc(offer.key)}"><span>● In the Item Shop now</span><span>${fmt(offer.final)} V-Bucks ›</span></button>` : '') +
       (it.description ? `<p class="desc">${esc(it.description)}</p>` : '') +
       factsHTML(facts) +
+      (em ? `<button class="inc" data-act="goto-locker" data-type="${esc(em.type)}" data-g="${em.g}"><span>Open in Locker</span><span>${esc(em.seasonShort)} ›</span></button>` : '') +
       `<div class="btn-row"><button class="btn" data-act="copy" data-v="${esc(it.id)}" data-w="ID">Copy ID</button>` +
       `<button class="btn" data-act="copy" data-v="${esc(it.name)}" data-w="name">Copy name</button>` +
       `<button class="btn" data-act="link">Share link</button></div>` +
       `<a class="btn btn-accent block" href="${esc(epicItemUrl(it))}" target="_blank" rel="noopener">↗ Open on fortnite.com</a>`,
     );
+    if (em) bindLockerPlayer(em);
   }
 
   function showOffer(e) {
@@ -618,6 +643,8 @@
     else if (act === 'link') copy(location.href, 'link');
     else if (act === 'goto-offer') gotoOffer(b.dataset.key);
     else if (act === 'goto-item') gotoCosmetic(b.dataset.id);
+    else if (act === 'goto-locker') gotoLocker(b.dataset.type, b.dataset.g);
+    else if (act.startsWith('ep-')) lockerAction(act, b);
     else if (act === 'sp' || act === 'sp-all') {
       const en = selectedEntry();
       if (!en) return;
@@ -1349,6 +1376,580 @@
     );
   }
 
+  // ------------------------------------------------------------------ locker
+  // data/locker/index.json + one file per type (outfit.json, emote.json, ...) are built from Fortnite.GG's item list by
+  // tools/scrape_fortnitegg.py (daily). Showcase clips are Fortnite.GG's on fnggcdn.com: video-sd.mp4 (~380 px, 1-2 MB)
+  // for previews, video.mp4 for HD. Sprays and loading screens have no clip, so they show the full render instead.
+  const LOCKER_SORTS = ['Newest', 'Oldest', 'Name A-Z', 'Rarity (high-low)'];
+  const LOCKER_PREFS_KEY = 'fcb.locker.v1';
+  const RARITY_NAMES = { gaminglegends: 'Gaming Legends', starwars: 'Star Wars', dc: 'DC', icon: 'Icon Series', crew: 'Crew' };
+  const TAG_NAMES = { dance: 'Dance', traversal: 'Traversal', synced: 'Synced', builtin: 'Built-in', reactive: 'Reactive', unreleased: 'Unreleased', styles: 'Styles', animated: 'Animated' };
+  // cosmetic type.backendValue (fortnite-api.com) -> locker type id
+  const LOCKER_BACKEND = {
+    AthenaCharacter: 'outfit', AthenaDance: 'emote', AthenaBackpack: 'backpack', AthenaPickaxe: 'pickaxe', AthenaGlider: 'glider',
+    CosmeticCompanion: 'sidekick', CosmeticShoes: 'kicks', AthenaItemWrap: 'wrap', AthenaSkyDiveContrail: 'contrail', SparksAura: 'aura',
+    AthenaEmoji: 'emoji', AthenaSpray: 'spray', AthenaLoadingScreen: 'loadingscreen',
+  };
+  // [label, test]; a filter shows only when it matches something in the current type ('All' always shows)
+  const LOCKER_FILTERS = [
+    ['All', () => true],
+    ['This season', (e, T) => e.season === T.current],
+    ['In the shop now', (e) => !!e.id && state.shopByItem.has(e.id)],
+    ['Dances', (e) => e.tags.includes('dance')],
+    ['Traversal', (e) => e.tags.includes('traversal')],
+    ['Synced', (e) => e.tags.includes('synced')],
+    ['Built-in', (e) => e.tags.includes('builtin')],
+    ['With styles', (e) => e.tags.includes('styles')],
+    ['Reactive', (e) => e.tags.includes('reactive')],
+    ['Animated', (e) => e.tags.includes('animated')],
+    ['Unreleased', (e) => e.tags.includes('unreleased')],
+  ];
+  const lockerPrefs = (() => {
+    let p = {};
+    try { p = JSON.parse(store.get(LOCKER_PREFS_KEY, null) || store.get('fcb.emotes.v1', '{}')) || {}; } catch { /* ignore */ }
+    return { hd: !!p.hd, sound: p.sound !== false, previews: p.previews !== false, speed: p.speed === 0.5 ? 0.5 : 1 };
+  })();
+  const saveLockerPrefs = () => store.set(LOCKER_PREFS_KEY, JSON.stringify(lockerPrefs));
+  const fill = (tpl, e) => String(tpl || '').replace('{g}', e.g).replace('{img}', e.img || 1);
+  const canHover = window.matchMedia && matchMedia('(hover: hover) and (pointer: fine)').matches;
+  const lockerType = (id = state.lockerType) => state.locker && state.locker.types.get(id);
+
+  function seasonLabelFor(seasons, s) {
+    const l = seasons[s];
+    if (!l) return `Season ${s}`;
+    const m = /^C(\d+) (.+)$/.exec(l);
+    const part = m && m[2].replace(/^MS(\d*)$/, (_, n) => `Mini Season${n ? ' ' + n : ''}`).replace(/^S(\d+|X)$/, 'Season $1');
+    return m ? `Chapter ${m[1]} · ${part}` : l;
+  }
+
+  function normalizeLockerType(index, info, data) {
+    if (!data || data.schema !== 1 || !Array.isArray(data.items)) throw new Error(`unsupported ${info.id} data`);
+    const seasons = index.seasons || {};
+    const items = data.items.map((x) => {
+      const rk = x.rarity || 'common';
+      const e = {
+        key: `${info.id}:${x.g}`, type: info.id, typeName: info.single, g: x.g, id: x.id || '', name: x.name || String(x.g), rarityKey: rk,
+        rarity: RARITY_NAMES[rk] || rk.charAt(0).toUpperCase() + rk.slice(1),
+        season: x.season || 0, seasonShort: seasons[x.season] || `S${x.season}`, seasonLabel: seasonLabelFor(seasons, x.season),
+        added: x.added || '', img: x.img || 1, tags: x.tags || [], set: x.set || '',
+        source: x.source || '', price: x.price || 0, lastSeen: x.lastSeen || '', hasVideo: !!info.video,
+      };
+      e.icon = fill(index.icon, e); e.featured = fill(index.featured, e); e.page = fill(index.page, e);
+      e.video = info.video ? fill(index.video, e) : ''; e.sd = info.video ? fill(index.videoSD || index.video, e) : '';
+      e.search = [e.name, e.id, e.set, e.rarity, e.source, e.seasonShort, ...e.tags.map((t) => TAG_NAMES[t] || t)].join(' ').toLowerCase();
+      return e;
+    });
+    return { ...info, items, current: Math.max(0, ...items.map((e) => e.season)), byG: new Map(items.map((e) => [String(e.g), e])) };
+  }
+
+  async function loadLocker() {
+    try {
+      const res = await fetch('data/locker/index.json', { cache: 'no-cache' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const index = await res.json();
+      if (index.schema !== 1 || !Array.isArray(index.types)) throw new Error('unsupported locker data');
+      state.locker = { index, types: new Map(), loading: new Map(), byId: new Map() };
+      state.lockerError = null;
+      $('#lockerCount').textContent = fmt(index.types.reduce((n, t) => n + t.count, 0));
+      if (!index.types.some((t) => t.id === state.lockerType)) state.lockerType = index.types[0].id;
+      await ensureLockerType(state.lockerType);
+    } catch (err) {
+      state.lockerError = err;
+    }
+    paintLockerBar();
+    applyFilter('locker');
+    if (state.mode === 'locker') buildSidebar();
+    routeFromHash(true);
+  }
+
+  // loads (once) the file for one type; resolves to the normalized type or null
+  function ensureLockerType(id) {
+    const L = state.locker;
+    if (!L) return Promise.resolve(null);
+    if (L.types.has(id)) return Promise.resolve(L.types.get(id));
+    if (L.loading.has(id)) return L.loading.get(id);
+    const info = L.index.types.find((t) => t.id === id);
+    if (!info) return Promise.resolve(null);
+    const p = fetch(`data/locker/${info.file}`, { cache: 'no-cache' })
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then((d) => {
+        const T = normalizeLockerType(L.index, info, d);
+        L.types.set(id, T);
+        for (const e of T.items) if (e.id) L.byId.set(e.id.toLowerCase(), e);
+        return T;
+      })
+      .catch((err) => { console.warn('locker', id, err); return null; })
+      .finally(() => L.loading.delete(id));
+    L.loading.set(id, p);
+    return p;
+  }
+
+  function lockerFiltersFor(T) {
+    if (!T) return [['All', 0]];
+    return LOCKER_FILTERS.map(([label, test]) => [label, T.items.filter((e) => test(e, T)).length])
+      .filter(([label, n]) => label === 'All' || label === 'This season' || label === 'In the shop now' || n > 0);
+  }
+
+  function lockerSections(match) {
+    const T = lockerType();
+    if (!T) return [];
+    const f = LOCKER_FILTERS.find(([label]) => label === state.lockerFilter) || LOCKER_FILTERS[0];
+    const list = T.items.filter((e) => f[1](e, T) && match(e));
+    const s = state.lockerSort;
+    if (s === 'Name A-Z') return [{ title: null, items: list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })) }];
+    if (s === 'Rarity (high-low)') return [{ title: null, items: list.sort((a, b) => rarityRank(b.rarityKey) - rarityRank(a.rarityKey) || (a.added < b.added ? 1 : -1)) }];
+    if (s === 'Oldest') list.reverse();
+    const secs = new Map();
+    for (const e of list) {
+      if (!secs.has(e.season)) secs.set(e.season, []);
+      secs.get(e.season).push(e);
+    }
+    const noun = (n) => (n === 1 ? T.single : T.name).toLowerCase();
+    return [...secs].map(([, items]) => ({ title: items[0].seasonLabel, subtitle: `${items.length} ${noun(items.length)}`, items }));
+  }
+
+  function paintLockerBar() {
+    if (!state.locker) { el.lockerBar.innerHTML = ''; return; }
+    el.lockerBar.innerHTML = state.locker.index.types.map((t) =>
+      `<button class="chip${t.id === state.lockerType ? ' active' : ''}" data-ltype="${esc(t.id)}">${esc(t.name)} <span>${fmt(t.count)}</span></button>`).join('');
+  }
+
+  async function setLockerType(id, { keepFilter = false } = {}) {
+    if (!state.locker) return;
+    state.lockerType = id;
+    if (!keepFilter) state.lockerFilter = 'All';
+    state.grid.locker.selected = null;
+    paintLockerBar();
+    if (!state.locker.types.has(id)) { state.grid.locker.sections = []; state.grid.locker.flat = []; layout(); }
+    await ensureLockerType(id);
+    if (state.lockerType !== id) return;
+    applyFilter('locker');
+    el.wrap.scrollTop = 0;
+    buildSidebar();
+    if (state.mode === 'locker') { showAbout(); setHash(`locker/${id}`); }
+  }
+
+  function lockerTileHTML(e, i, sel) {
+    const L = state.layout, tile = L.tile, [x, y] = L.pos[i];
+    const T = lockerType(e.type);
+    const pills = [];
+    if (e.id && state.shopByItem.has(e.id)) pills.push('<span class="pill">IN SHOP</span>');
+    else if (T && e.season === T.current) pills.push('<span class="pill hot">NEW</span>');
+    return `<div class="tile ecard${sel}" data-i="${i}" style="left:${x}px;top:${y}px;width:${tile}px;height:${tile + TEXT_H}px">` +
+      `<div class="tile-img" style="height:${tile}px;background:${gradient(rarityBg(e.rarityKey))}">${pills.join('')}` +
+      `<img src="${esc(e.icon)}" alt="${esc(e.name)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onload="this.classList.add('loaded')" onerror="this.remove()">` +
+      (e.hasVideo ? `<span class="eplay" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span>` : '') +
+      `<i class="rbar" style="background:${rarityColor(e.rarityKey)}"></i></div>` +
+      `<div class="tile-text"><div class="tile-name" title="${esc(e.name)}">${esc(e.name)}</div><div class="tile-sub">${esc(e.seasonShort)} · ${esc(e.rarity)}</div></div></div>`;
+  }
+
+  // hover previews: a muted SD clip plays inside the tile under the pointer
+  let hoverTile = null, hoverTimer = 0;
+  function stopHover() {
+    clearTimeout(hoverTimer);
+    if (hoverTile) { const v = hoverTile.querySelector('video'); if (v) { v.pause(); v.remove(); } hoverTile.classList.remove('playing'); }
+    hoverTile = null;
+  }
+  el.inner.addEventListener('mouseover', (ev) => {
+    if (state.mode !== 'locker' || !canHover || !lockerPrefs.previews) return;
+    const t = ev.target.closest('.tile');
+    if (t === hoverTile) return;
+    stopHover();
+    if (!t) return;
+    hoverTile = t;
+    hoverTimer = setTimeout(() => {
+      const e = state.grid.locker.flat[Number(t.dataset.i)];
+      if (!e || !e.hasVideo || hoverTile !== t) return;
+      const v = document.createElement('video');
+      Object.assign(v, { muted: true, loop: true, playsInline: true, autoplay: true, preload: 'auto', src: e.sd });
+      v.className = 'tvid';
+      v.addEventListener('playing', () => t.classList.add('playing'), { once: true });
+      v.addEventListener('error', () => v.remove(), { once: true });
+      t.querySelector('.tile-img').appendChild(v);
+    }, 180);
+  });
+  el.inner.addEventListener('mouseleave', stopHover);
+  el.wrap.addEventListener('scroll', () => { if (hoverTile && !hoverTile.isConnected) hoverTile = null; }, { passive: true });
+
+  const ICONS = {
+    play: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>',
+    sound: '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/></svg>',
+    mute: '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM17 9.5l5 5M22 9.5l-5 5"/></svg>',
+    full: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>',
+  };
+
+  // detail media: the showcase player for clip types, the big render (featured.png, falling back to the icon) otherwise
+  function lockerMediaHTML(e) {
+    if (!e.hasVideo) {
+      return `<a class="d-img" href="${esc(e.featured)}" target="_blank" rel="noopener" style="background:${gradient(rarityBg(e.rarityKey))}">` +
+        `<img src="${esc(e.featured)}" alt="${esc(e.name)} - Fortnite ${esc(e.typeName)}" referrerpolicy="no-referrer" onerror="if(this.src!=='${esc(e.icon)}')this.src='${esc(e.icon)}'"></a>`;
+    }
+    return `<div class="eplayer" data-key="${esc(e.key)}" style="background:${gradient(rarityBg(e.rarityKey))}">` +
+      `<img class="ep-poster" src="${esc(e.icon)}" alt="${esc(e.name)} - Fortnite ${esc(e.typeName)}" referrerpolicy="no-referrer">` +
+      `<video class="ep-video" loop playsinline preload="auto"></video>` +
+      '<div class="ep-spin"><div class="spinner"></div></div><div class="ep-msg" hidden></div>' +
+      `<button class="ep-big" data-act="ep-play" aria-label="Play">${ICONS.play}</button>` +
+      '<div class="ep-bar">' +
+      `<button class="ep-btn" data-act="ep-play" aria-label="Play or pause">${ICONS.pause}</button>` +
+      '<div class="ep-track" data-act="ep-seek"><i></i></div><span class="ep-time">0:00</span>' +
+      `<button class="ep-btn ep-txt" data-act="ep-speed" title="Playback speed">${lockerPrefs.speed === 0.5 ? '0.5×' : '1×'}</button>` +
+      `<button class="ep-btn ep-txt${lockerPrefs.hd ? ' on' : ''}" data-act="ep-hd" title="HD video (bigger download)">HD</button>` +
+      `<button class="ep-btn" data-act="ep-sound" aria-label="Sound">${lockerPrefs.sound ? ICONS.sound : ICONS.mute}</button>` +
+      `<button class="ep-btn" data-act="ep-full" aria-label="Full screen">${ICONS.full}</button>` +
+      '</div></div>';
+  }
+
+  function bindLockerPlayer(e) {
+    const box = el.detailBody.querySelector('.eplayer');
+    if (!box || !e.hasVideo) return;
+    const v = box.querySelector('video'), bar = box.querySelector('.ep-track i'), time = box.querySelector('.ep-time');
+    const playBtn = box.querySelector('.ep-bar [data-act="ep-play"]');
+    let triedOther = false;
+    v.muted = !lockerPrefs.sound;  // clips without music just have a silent track
+    v.playbackRate = lockerPrefs.speed;
+    v.src = lockerPrefs.hd ? e.video : e.sd;
+    const sync = () => {
+      box.classList.toggle('paused', v.paused);
+      playBtn.innerHTML = v.paused ? ICONS.play : ICONS.pause;
+    };
+    v.addEventListener('playing', () => { box.classList.add('ready'); sync(); });
+    v.addEventListener('pause', sync);
+    v.addEventListener('waiting', () => box.classList.remove('ready'));
+    v.addEventListener('timeupdate', () => {
+      if (!v.duration) return;
+      bar.style.width = `${(v.currentTime / v.duration) * 100}%`;
+      const s = Math.floor(v.currentTime);
+      time.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    });
+    v.addEventListener('error', () => {
+      if (!triedOther) { triedOther = true; v.src = v.src.includes('-sd.') ? e.video : e.sd; v.play().catch(() => {}); return; }
+      box.classList.add('failed');
+      const msg = box.querySelector('.ep-msg'); msg.hidden = false; msg.textContent = 'No showcase video for this item yet.';
+    });
+    v.addEventListener('click', () => (v.paused ? v.play() : v.pause()));
+    v.play().catch(() => { v.muted = true; v.play().catch(sync); });
+  }
+
+  function lockerAction(act, b) {
+    const box = b.closest('.eplayer');
+    const v = box && box.querySelector('video');
+    if (!v) return;
+    const [type, g] = String(box.dataset.key).split(':');
+    const T = lockerType(type), e = T && T.byG.get(g);
+    if (act === 'ep-play') { if (v.paused) v.play().catch(() => {}); else v.pause(); }
+    else if (act === 'ep-sound') {
+      lockerPrefs.sound = v.muted; v.muted = !v.muted; saveLockerPrefs();
+      b.innerHTML = v.muted ? ICONS.mute : ICONS.sound;
+      if (v.paused) v.play().catch(() => {});
+    } else if (act === 'ep-speed') {
+      lockerPrefs.speed = lockerPrefs.speed === 1 ? 0.5 : 1; saveLockerPrefs();
+      v.playbackRate = lockerPrefs.speed; b.textContent = lockerPrefs.speed === 0.5 ? '0.5×' : '1×';
+    } else if (act === 'ep-hd' && e) {
+      lockerPrefs.hd = !lockerPrefs.hd; saveLockerPrefs();
+      b.classList.toggle('on', lockerPrefs.hd);
+      const t = v.currentTime;
+      box.classList.remove('ready');
+      v.src = lockerPrefs.hd ? e.video : e.sd;
+      v.addEventListener('loadedmetadata', () => { v.currentTime = Math.min(t, v.duration || t); }, { once: true });
+      v.play().catch(() => {});
+    } else if (act === 'ep-full') {
+      if (document.fullscreenElement) document.exitFullscreen(); else (box.requestFullscreen || box.webkitRequestFullscreen || (() => {})).call(box);
+    }
+  }
+  el.detailBody.addEventListener('pointerdown', (ev) => {
+    const tr = ev.target.closest('.ep-track');
+    if (!tr) return;
+    const v = tr.closest('.eplayer').querySelector('video');
+    const seek = (x) => { const r = tr.getBoundingClientRect(); if (v.duration) v.currentTime = Math.max(0, Math.min(1, (x - r.left) / r.width)) * v.duration; };
+    seek(ev.clientX);
+    const move = (m) => seek(m.clientX);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', () => window.removeEventListener('pointermove', move), { once: true });
+  });
+
+  function showLockerItem(e) {
+    stopHover();
+    const cos = e.id && state.byId.get(e.id);
+    const offer = e.id && state.shopByItem.get(e.id);
+    const facts = [['Type', e.typeName], ['Season', e.seasonLabel]];
+    if (e.added) facts.push(['Added', fmtNewsDate(e.added)]);
+    if (e.set) facts.push(['Set', e.set]);
+    if (e.source) facts.push(['Source', e.source]);
+    if (e.price) facts.push(['Price', `${fmt(e.price)} V-Bucks`]);
+    if (e.lastSeen) facts.push(['Last in shop', fmtNewsDate(e.lastSeen)]);
+    if (e.id) facts.push(['ID', e.id]);
+    const badges = [`<span class="badge" style="background:${rarityColor(e.rarityKey)}">${esc(e.rarity)}</span>`, `<span class="badge">${esc(e.typeName)}</span>`,
+      ...e.tags.map((t) => `<span class="badge">${esc(TAG_NAMES[t] || t)}</span>`)];
+    setDetail(
+      lockerMediaHTML(e) +
+      `<h2>${esc(e.name)}</h2><div class="badges">${badges.join('')}</div>` +
+      (offer ? `<button class="shop-link" data-act="goto-offer" data-key="${esc(offer.key)}"><span>● In the Item Shop now</span><span>${fmt(offer.final)} V-Bucks ›</span></button>` : '') +
+      (cos && cos.description ? `<p class="desc">${esc(cos.description)}</p>` : '') +
+      factsHTML(facts) +
+      (cos ? `<button class="inc" data-act="goto-item" data-id="${esc(cos.id)}"><span>Open in Cosmetics</span><span>${esc(cos.type)} ›</span></button>` : '') +
+      `<div class="btn-row"><button class="btn" data-act="copy" data-v="${esc(e.name)}" data-w="name">Copy name</button><button class="btn" data-act="link">Share link</button>` +
+      (e.hasVideo ? `<a class="btn" href="${esc(lockerPrefs.hd ? e.video : e.sd)}" target="_blank" rel="noopener">Open video ↗</a>` : `<a class="btn" href="${esc(e.featured)}" target="_blank" rel="noopener">Open image ↗</a>`) + '</div>' +
+      `<a class="btn btn-accent block" href="${esc(e.page)}" target="_blank" rel="noopener">View on Fortnite.GG</a>` +
+      (cos ? `<a class="btn block" style="margin-top:8px" href="${esc(epicItemUrl(cos))}" target="_blank" rel="noopener">↗ Open on fortnite.com</a>` : ''),
+    );
+    bindLockerPlayer(e);
+  }
+
+  async function gotoLocker(type, g, fromRoute = false) {
+    setMode('locker', { keepHash: true });
+    state.search.locker = ''; el.search.value = '';
+    if (state.lockerType !== type || state.lockerFilter !== 'All') await setLockerType(type);
+    else { applyFilter('locker'); buildSidebar(); }
+    const i = state.grid.locker.flat.findIndex((e) => String(e.g) === String(g));
+    if (i >= 0) select(i, { fromRoute, open: !fromRoute || window.innerWidth > 980 });
+  }
+
+  // ------------------------------------------------------------------ stats
+  // Season leaderboards come from data/stats.json (scraped from fortnite.gg/stats every 3 h). Player lookups call
+  // Fortnite.GG's own JSON (`/stats[/<mode>]?player=<name>&ajax`). That endpoint sends no CORS header, so a browser
+  // on another site may be blocked; the page then explains it and links to Fortnite.GG (the desktop app has no limit).
+  const STATS_KEY = 'fcb.stats.v1';
+  const PLATFORMS = { epic: 'Epic', xbl: 'Xbox', psn: 'PlayStation' };
+  const BOARD_ICONS = { level: '⭐', wins: '👑', kills: '🎯', time: '⏱', rank: '🏆' };
+  const statsStore = (() => {
+    let d = {};
+    try { d = JSON.parse(store.get(STATS_KEY, '{}')) || {}; } catch { /* ignore */ }
+    return { tracked: Array.isArray(d.tracked) ? d.tracked : [], recent: Array.isArray(d.recent) ? d.recent : [], history: d.history && typeof d.history === 'object' ? d.history : {} };
+  })();
+  const saveStatsStore = () => store.set(STATS_KEY, JSON.stringify(statsStore));
+  const playerKey = (name, platform) => `${platform || 'epic'}:${String(name).toLowerCase()}`;
+  const fmtMinutes = (m) => { m = Math.round(m || 0); const h = Math.floor(m / 60); return h ? `${fmt(h)}h ${m % 60}m` : `${m % 60}m`; };
+
+  function deriveStats(st) {
+    const matches = st.matches || 0, wins = st.wins || 0, kills = st.kills || 0, time = st.minutes || st.time || 0;
+    const deaths = matches - wins;
+    return {
+      winPct: matches ? +(wins / matches * 100).toFixed(1) : 0,
+      kd: deaths > 0 ? +(kills / deaths).toFixed(2) : kills,
+      kpm: matches ? +(kills / matches).toFixed(2) : 0,
+      time, avgMatch: matches ? time / matches : 0,
+    };
+  }
+
+  // snapshot each lookup so the page can show progress ("since Nov 7: +3 wins")
+  function recordSnapshot(name, platform, mode, st) {
+    const k = playerKey(name, platform);
+    const h = (statsStore.history[k] = statsStore.history[k] || {});
+    const list = (h[mode] = h[mode] || []);
+    const snap = { t: new Date().toISOString(), level: st.level ?? null, wins: st.wins || 0, matches: st.matches || 0, kills: st.kills || 0, time: st.minutes || st.time || 0, rank_text: st.rank_text || '', rank_percent: st.rank_percent || 0 };
+    const last = list[list.length - 1];
+    const same = last && ['level', 'wins', 'matches', 'kills', 'time', 'rank_percent', 'rank_text'].every((f) => last[f] === snap[f]);
+    if (same) last.t = snap.t; else list.push(snap);
+    if (list.length > 50) list.splice(0, list.length - 50);
+    saveStatsStore();
+    return list;
+  }
+
+  function rememberSearch(name, platform) {
+    statsStore.recent = [{ name, platform }, ...statsStore.recent.filter((r) => playerKey(r.name, r.platform) !== playerKey(name, platform))].slice(0, 8);
+    saveStatsStore();
+  }
+  const isTracked = (name, platform) => statsStore.tracked.some((r) => playerKey(r.name, r.platform) === playerKey(name, platform));
+  function toggleTracked(name, platform) {
+    if (isTracked(name, platform)) statsStore.tracked = statsStore.tracked.filter((r) => playerKey(r.name, r.platform) !== playerKey(name, platform));
+    else statsStore.tracked = [...statsStore.tracked, { name, platform }].slice(-20);
+    saveStatsStore();
+  }
+
+  async function loadStats() {
+    try {
+      const res = await fetch('data/stats.json', { cache: 'no-cache' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      if (d.schema !== 1 || !Array.isArray(d.boards)) throw new Error('unsupported stats data');
+      state.stats = d;
+      state.statsError = null;
+      $('#statsCount').textContent = d.season || '';
+    } catch (err) {
+      state.statsError = err;
+    }
+    if (state.mode === 'stats') { buildSidebar(); renderStats(); }
+    routeFromHash(true);
+  }
+
+  const statsModes = () => (state.stats ? state.stats.modes : [{ id: 'all', path: '/stats', name: 'All modes' }]);
+  const statsMode = (id = state.statsMode) => statsModes().find((m) => m.id === id) || statsModes()[0];
+  function statsUrl(tpl, name, platform, mode) {
+    const t = tpl || 'https://fortnite.gg{path}?player={name}{platform}';
+    return t.replace('{path}', statsMode(mode).path).replace('{name}', encodeURIComponent(name)).replace('{platform}', platform && platform !== 'epic' ? `&platform=${platform}` : '');
+  }
+
+  async function lookupPlayer(name, platform = 'epic', mode = state.statsMode) {
+    name = String(name || '').trim();
+    if (!name) return;
+    const req = (state.statsReq = { name, platform, mode });
+    state.statsPlayer = { name, platform, mode, loading: true };
+    renderStats(); showStatsInfo();
+    setHash(`stats/${mode}/${encodeURIComponent(name)}${platform !== 'epic' ? '@' + platform : ''}`);
+    let result;
+    try {
+      const res = await fetch(statsUrl(state.stats && state.stats.playerApi ? state.stats.playerApi : 'https://fortnite.gg{path}?player={name}{platform}&ajax', name, platform, mode));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const j = await res.json();
+      if (j.error) {
+        // inert parse (DOMParser runs no handlers); drop the site's "back to search" link
+        const doc = new DOMParser().parseFromString(String(j.error).replace(/<h2[\s\S]*?<\/h2>/, ''), 'text/html');
+        result = { error: (doc.body.textContent || '').replace(/\s+/g, ' ').trim() || 'Player not found.' };
+      }
+      else if (!j.stats) result = { error: 'Stats are currently unavailable.' };
+      else result = { stats: j.stats };
+    } catch (err) {
+      result = { blocked: true, message: err.message };
+    }
+    if (state.statsReq !== req) return;
+    const p = { name: (result.stats && result.stats.name) || name, platform, mode, ...result, at: new Date() };
+    if (p.stats) {
+      p.history = recordSnapshot(p.name, platform, mode, p.stats);
+      rememberSearch(p.name, platform);
+    }
+    state.statsPlayer = p;
+    renderStats(); showStatsInfo();
+    if (state.mode === 'stats') buildSidebar();
+  }
+
+  function statTile(label, value, sub = '') {
+    return `<div class="st-tile"><span>${esc(label)}</span><b>${esc(value)}</b>${sub ? `<i>${esc(sub)}</i>` : ''}</div>`;
+  }
+
+  function deltaHTML(hist) {
+    if (!hist || hist.length < 2) return '';
+    const a = hist[hist.length - 2], b = hist[hist.length - 1];
+    const parts = [];
+    const d = (f, label) => { const x = (b[f] || 0) - (a[f] || 0); if (x) parts.push(`<b class="${x > 0 ? 'up' : 'down'}">${x > 0 ? '+' : ''}${fmt(x)}</b> ${label}`); };
+    d('wins', 'wins'); d('kills', 'kills'); d('matches', 'matches'); d('level', 'levels');
+    const t = (b.time || 0) - (a.time || 0); if (t > 0) parts.push(`<b class="up">+${fmtMinutes(t)}</b> played`);
+    if (!parts.length) return '';
+    const since = new Date(a.t).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return `<div class="st-delta"><span>Since ${esc(since)}</span>${parts.join(' · ')}</div>`;
+  }
+
+  function trendSVG(hist) {
+    if (!hist || hist.length < 2) return '';
+    const W = 300, H = 70, P = 6;
+    const line = (f, color) => {
+      const vals = hist.map((x) => x[f] || 0), lo = Math.min(...vals), hi = Math.max(...vals), span = hi - lo || 1;
+      const pts = vals.map((v, i) => `${(P + (i / (vals.length - 1)) * (W - 2 * P)).toFixed(1)},${(H - P - ((v - lo) / span) * (H - 2 * P)).toFixed(1)}`).join(' ');
+      return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    };
+    return `<div class="st-trend"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${line('kills', '#ee4245')}${line('wins', '#fce51e')}</svg>` +
+      `<div class="st-legend"><span style="--c:#fce51e">Wins</span><span style="--c:#ee4245">Kills</span><span>${hist.length} checks</span></div></div>`;
+  }
+
+  function playerCardHTML(p) {
+    const plat = PLATFORMS[p.platform] || 'Epic';
+    const head = `<div class="st-head"><div><h2 class="display">${esc(p.name)}</h2><div class="st-sub">${esc(plat)} · ${esc(statsMode(p.mode).name)}${state.stats && state.stats.season ? ` · Season ${esc(state.stats.season)}` : ''}</div></div>` +
+      (p.stats ? `<button class="chip-toggle${isTracked(p.name, p.platform) ? ' active' : ''}" data-sact="track">${isTracked(p.name, p.platform) ? '★ Tracking' : '☆ Track'}</button>` : '') + '</div>';
+    if (p.loading) return `<div class="st-card">${head}<div class="st-loading"><div class="spinner"></div><p>Looking up ${esc(p.name)}...</p></div></div>`;
+    const page = statsUrl(state.stats && state.stats.playerPage, p.name, p.platform, p.mode);
+    if (p.blocked) {
+      return `<div class="st-card">${head}<div class="st-note"><b>Fortnite.GG didn't let this page read the stats.</b> Its stats API doesn't allow requests from other websites yet (no CORS header), so lookups only work in the desktop app for now. ` +
+        `<a href="${esc(page)}" target="_blank" rel="noopener">See ${esc(p.name)} on Fortnite.GG ↗</a></div></div>`;
+    }
+    if (p.error) return `<div class="st-card">${head}<div class="st-note">${esc(p.error)} Check the spelling and platform (Xbox / PlayStation names need the matching platform). <a href="${esc(page)}" target="_blank" rel="noopener">Try on Fortnite.GG ↗</a></div></div>`;
+    const st = p.stats, dv = deriveStats(st);
+    if (p.mode !== 'arena' && !st.matches) {
+      return `<div class="st-card">${head}<div class="st-note">No ${esc(statsMode(p.mode).name)} matches this season yet. Try another mode above.</div></div>`;
+    }
+    const ranked = p.mode === 'arena' || p.mode.startsWith('ranked');
+    const rankIcon = state.stats && state.stats.rankIcon && st.rank != null ? state.stats.rankIcon.replace('{rank}', st.rank) : '';
+    const rank = ranked && st.rank_text ? `<div class="st-rank">${rankIcon ? `<img src="${esc(rankIcon)}" alt="" referrerpolicy="no-referrer">` : ''}<div><b>${esc(st.rank_text)}</b><span>${st.rank_percent ? `${st.rank_percent}% to next rank` : 'Current rank'}${st.rank_ranking ? ` · #${fmt(st.rank_ranking)}` : ''}</span></div></div>` : '';
+    const tiles = p.mode === 'arena' ? '' : [
+      statTile('Wins', fmt(st.wins)), statTile('Win rate', `${dv.winPct}%`), statTile('Matches', fmt(st.matches)),
+      statTile('K/D', dv.kd), statTile('Kills / match', dv.kpm), statTile('Kills', fmt(st.kills)),
+      statTile('Time played', fmtMinutes(dv.time)), statTile('Avg match', fmtMinutes(dv.avgMatch)),
+      st.level != null && !ranked ? statTile('Level', fmt(st.level)) : '',
+    ].join('');
+    return `<div class="st-card">${head}${rank}${tiles ? `<div class="st-tiles">${tiles}</div>` : ''}${deltaHTML(p.history)}${trendSVG(p.history)}` +
+      `<div class="st-foot">Checked ${esc(p.at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }))} · <a href="${esc(page)}" target="_blank" rel="noopener">Fortnite.GG stats card ↗</a></div></div>`;
+  }
+
+  function boardValue(b, v) {
+    if (b.key === 'time') return fmtMinutes(v);
+    if (b.key === 'rank') return v && typeof v === 'object' ? `${v.text}${v.pct != null ? ` ${v.pct}%` : ''}` : '';
+    return fmt(v);
+  }
+
+  function boardsHTML() {
+    if (!state.stats) return state.statsError ? `<p class="st-empty">Couldn't load leaderboards (${esc(state.statsError.message)}).</p>` : '<div class="st-loading"><div class="spinner"></div></div>';
+    const boards = state.stats.boards.filter((b) => b.mode === state.statsMode);
+    if (!boards.length) return '<p class="st-empty">No leaderboards for this mode yet.</p>';
+    const icon = state.stats.rankIcon;
+    return `<div class="st-boards">${boards.map((b) => {
+      const open = state.statsOpen.has(`${b.mode}/${b.key}`);
+      const rows = (open ? b.rows : b.rows.slice(0, 10)).map((r) => `<button class="st-row" data-sact="lookup" data-name="${esc(r.name)}" data-plat="${esc(r.platform || 'epic')}">` +
+        `<span class="st-pos${r.rank <= 3 ? ' top' : ''}">${r.rank}</span><span class="st-name">${esc(r.name)}${r.platform ? ` <em>${r.platform === 'xbl' ? 'XBOX' : 'PSN'}</em>` : ''}</span>` +
+        `<span class="st-val">${b.key === 'rank' && r.value && r.value.rank != null && icon ? `<img src="${esc(icon.replace('{rank}', r.value.rank))}" alt="" referrerpolicy="no-referrer">` : ''}${esc(boardValue(b, r.value))}</span></button>`).join('');
+      return `<section class="st-board"><h3><span>${BOARD_ICONS[b.key] || '📊'}</span>${esc(b.title.replace(/ Leaderboard$/, ''))}<small>${esc(b.column)}</small></h3>${rows}` +
+        (b.rows.length > 10 ? `<button class="st-more" data-sact="more" data-board="${esc(b.mode + '/' + b.key)}">${open ? 'Show top 10' : `Show top ${b.rows.length}`}</button>` : '') + '</section>';
+    }).join('')}</div>`;
+  }
+
+  function renderStats() {
+    if (state.mode !== 'stats') return;
+    const p = state.statsPlayer;
+    const chips = statsModes().map((m) => `<button class="chip${m.id === state.statsMode ? ' active' : ''}" data-sact="mode" data-mode="${esc(m.id)}">${esc(m.name)}</button>`).join('');
+    const tracked = statsStore.tracked.length ? `<div class="st-tracked">${statsStore.tracked.map((r) => `<button class="chip" data-sact="lookup" data-name="${esc(r.name)}" data-plat="${esc(r.platform)}">★ ${esc(r.name)}</button>`).join('')}</div>` : '';
+    el.statsWrap.innerHTML =
+      `<section class="st-hero"><h1 class="display">Fortnite Stats</h1><p>Season ${esc((state.stats && state.stats.season) || '')} stats and leaderboards from Fortnite.GG. Type an Epic name above and press <kbd>Enter</kbd>, or click any player.</p>${tracked}</section>` +
+      `<div class="st-chips">${chips}</div>` +
+      (p ? playerCardHTML(p) : '') +
+      `<h2 class="st-h">${esc(statsMode().name)} leaderboards${state.stats ? `<small>top ${state.stats.boards[0] ? state.stats.boards[0].rows.length : 40} · updated ${esc(state.stats.updated.replace('T', ' '))}</small>` : ''}</h2>${boardsHTML()}`;
+    updateStatus();
+  }
+
+  function showStatsInfo() {
+    const p = state.statsPlayer;
+    if (p && p.stats) {
+      const dv = deriveStats(p.stats);
+      setDetail(`<h2>${esc(p.name)}</h2><div class="badges"><span class="badge">${esc(PLATFORMS[p.platform])}</span><span class="badge">${esc(statsMode(p.mode).name)}</span></div>` +
+        factsHTML([['Wins', fmt(p.stats.wins)], ['Win rate', `${dv.winPct}%`], ['K/D', String(dv.kd)], ['Kills', fmt(p.stats.kills)], ['Matches', fmt(p.stats.matches)], ['Time played', fmtMinutes(dv.time)], ...(p.stats.rank_text && (p.mode === 'arena' || p.mode.startsWith('ranked')) ? [['Rank', p.stats.rank_text]] : [])]) +
+        `<div class="btn-row"><button class="btn" data-act="copy" data-v="${esc(`${p.name}: ${fmt(p.stats.wins)} wins, ${dv.winPct}% win rate, ${dv.kd} K/D, ${fmt(p.stats.kills)} kills (${statsMode(p.mode).name}, Season ${state.stats ? state.stats.season : ''})`)}" data-w="stats">Copy stats</button><button class="btn" data-act="link">Share link</button></div>` +
+        `<a class="btn btn-accent block" href="${esc(statsUrl(state.stats && state.stats.playerPage, p.name, p.platform, p.mode))}" target="_blank" rel="noopener">Open on Fortnite.GG</a>`);
+      return;
+    }
+    setDetail(`<h2>Stats</h2><p class="desc">Season stats for any player (Epic, Xbox or PlayStation name), with win rate, K/D, kills per match, time played and rank for Ranked and Arenas. ` +
+      `Every lookup is saved in this browser so you can see progress since your last check; ★ Track keeps a player one click away.</p>` +
+      factsHTML([['Leaderboards', state.stats ? `${state.stats.boards.length} boards · top 40` : '-'], ['Season', (state.stats && state.stats.season) || '-'], ['Data', 'Fortnite.GG']]) +
+      '<a class="btn btn-accent block" href="https://fortnite.gg/stats" target="_blank" rel="noopener">Fortnite.GG stats</a>');
+  }
+
+  function statsSidebarHTML() {
+    const row = (r, star) => `<button class="side-row" data-sact="lookup" data-name="${esc(r.name)}" data-plat="${esc(r.platform)}"><span>${star}${esc(r.name)}</span><span>${r.platform !== 'epic' ? (r.platform === 'xbl' ? 'Xbox' : 'PSN') : ''}</span></button>`;
+    return statsModes().map((m) => `<button class="side-row${m.id === state.statsMode ? ' active' : ''}" data-sact="mode" data-mode="${esc(m.id)}"><span>${esc(m.name)}</span><span>${state.stats ? state.stats.boards.filter((b) => b.mode === m.id).length || '' : ''}</span></button>`).join('') +
+      (statsStore.tracked.length ? '<div class="side-heading sub">Tracked</div>' + statsStore.tracked.map((r) => row(r, '★ ')).join('') : '') +
+      (statsStore.recent.length ? '<div class="side-heading sub">Recent</div>' + statsStore.recent.map((r) => row(r, '')).join('') : '');
+  }
+
+  function statsAction(b) {
+    const a = b.dataset.sact;
+    if (a === 'mode') {
+      state.statsMode = b.dataset.mode;
+      const p = state.statsPlayer;
+      if (p && !p.loading && (p.stats || p.error)) lookupPlayer(p.name, p.platform, state.statsMode);
+      else { renderStats(); setHash(`stats/${state.statsMode}`); }
+      buildSidebar();
+    } else if (a === 'lookup') {
+      el.search.value = state.search.stats = b.dataset.name;
+      state.statsPlatform = b.dataset.plat || 'epic'; el.statsPlatform.value = state.statsPlatform;
+      lookupPlayer(b.dataset.name, state.statsPlatform);
+      el.statsWrap.scrollTop = 0;
+    } else if (a === 'more') {
+      const k = b.dataset.board;
+      if (state.statsOpen.has(k)) state.statsOpen.delete(k); else state.statsOpen.add(k);
+      renderStats();
+    } else if (a === 'track' && state.statsPlayer) {
+      toggleTracked(state.statsPlayer.name, state.statsPlayer.platform);
+      renderStats(); buildSidebar();
+    }
+    document.body.classList.remove('menu-open');
+  }
+
   // ------------------------------------------------------------------ interactive map
   // data/map.json is scraped from Fortnite.GG's map by tools/scrape_fortnitegg.py (refreshed daily). Tiles and icons
   // are hotlinked from fortnite.gg. Rendering lives in map.js (window.FcbMap); this block is the app glue.
@@ -1503,14 +2104,19 @@
     state.mode = mode;
     document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
     el.search.value = state.search[mode];
-    el.search.placeholder = { browse: 'Search cosmetics, sets, IDs...', shop: 'Search the Item Shop...', sprites: 'Search sprites, abilities...', weapons: 'Search weapons & items...', map: 'Search layers & locations...', news: 'Search Fortnite news...' }[mode];
+    el.search.placeholder = { browse: 'Search cosmetics, sets, IDs...', shop: 'Search the Item Shop...', sprites: 'Search sprites, abilities...', weapons: 'Search weapons & items...', map: 'Search layers & locations...', news: 'Search Fortnite news...', locker: 'Search the locker: names, sets, seasons...', stats: 'Epic name, then Enter...' }[mode];
     el.browseTools.style.display = mode === 'browse' ? '' : 'none';
     el.spriteTools.style.display = mode === 'sprites' ? '' : 'none';
     el.weaponTools.style.display = mode === 'weapons' ? '' : 'none';
+    el.lockerTools.style.display = mode === 'locker' ? '' : 'none';
+    el.lockerBar.hidden = mode !== 'locker';
+    el.statsTools.style.display = mode === 'stats' ? '' : 'none';
+    el.statsWrap.hidden = mode !== 'stats';
+    if (mode !== 'locker') stopHover();
     el.hero.hidden = mode !== 'sprites';
-    el.wrap.hidden = mode === 'map';
+    el.wrap.hidden = mode === 'map' || mode === 'stats';
     el.mapWrap.hidden = mode !== 'map';
-    el.sizeSeg.style.display = mode === 'map' ? 'none' : '';
+    el.sizeSeg.style.display = mode === 'map' || mode === 'stats' ? 'none' : '';
     el.empty.hidden = true;
     if (mode === 'map') ensureMap(); else el.mapTip.hidden = true;
     buildSidebar();
@@ -1520,10 +2126,12 @@
     const g = state.grid[mode];
     if (mode === 'map') {
       if (fmap && fmap.selected) showMapHit(fmap.selected); else showMapInfo();
+    } else if (mode === 'stats') {
+      renderStats(); showStatsInfo();
     } else if (g.selected != null && g.flat[g.selected]) {
       showItem(g.flat[g.selected]);
     } else showAbout();
-    if (!keepHash) setHash(mode === 'browse' ? '' : mode);
+    if (!keepHash) setHash(mode === 'browse' ? '' : mode === 'stats' ? `stats/${state.statsMode}` : mode);
     updateStatus();
     document.body.classList.remove('menu-open');
   }
@@ -1553,6 +2161,16 @@
         '<div class="side-heading sub">Official</div>' +
         `<a class="side-row" href="${FN_NEWS}" target="_blank" rel="noopener"><span>fortnite.com/news</span><span>↗</span></a>` +
         `<a class="side-row" href="${FGG_NEWS}" target="_blank" rel="noopener"><span>Fortnite.GG archive</span><span>↗</span></a>`;
+    } else if (state.mode === 'stats') {
+      el.sideHeading.textContent = 'Modes';
+      el.sideList.innerHTML = statsSidebarHTML();
+    } else if (state.mode === 'locker') {
+      const T = lockerType();
+      el.sideHeading.textContent = T ? T.name : 'Locker';
+      el.sideList.innerHTML = lockerFiltersFor(T).map(([f, n]) =>
+        `<button class="side-row${f === state.lockerFilter ? ' active' : ''}" data-lfilter="${esc(f)}"><span>${esc(f)}</span><span>${T ? fmt(n) : ''}</span></button>`).join('') +
+        (state.grid.locker.sections.some((x) => x.title) ? '<div class="side-heading sub">Seasons</div>' + state.grid.locker.sections.filter((x) => x.title).map((x) =>
+          `<button class="side-row" data-section="${esc(x.title)}"><span>${esc(x.title)}</span><span>${x.items.length}</span></button>`).join('') : '');
     } else if (state.mode === 'map') {
       el.sideHeading.textContent = 'Map layers';
       el.sideList.innerHTML = mapSidebarHTML();
@@ -1570,6 +2188,7 @@
   el.sideList.addEventListener('click', (e) => {
     const b = e.target.closest('.side-row');
     if (!b) return;
+    if (b.dataset.sact) { statsAction(b); return; }
     if (b.dataset.cat != null) {
       state.cat = b.dataset.cat;
       el.sideList.querySelectorAll('.side-row').forEach((r) => r.classList.toggle('active', r === b));
@@ -1578,6 +2197,9 @@
       state.spriteFilter = b.dataset.filter;
       buildSidebar();
       applyFilter('sprites');
+    } else if (b.dataset.lfilter != null) {
+      state.lockerFilter = b.dataset.lfilter;
+      applyFilter('locker');
     } else if (b.dataset.backup) {
       if (b.dataset.backup === 'export') exportProgress(); else importProgress();
     } else if (b.dataset.layer) {
@@ -1643,6 +2265,28 @@
         const i = state.grid.news.flat.findIndex((it) => it.id === id);
         if (i >= 0 && state.grid.news.selected !== i) select(i, { fromRoute: true, open: window.innerWidth > 980 });
       }
+    } else if (h.startsWith('stats')) {
+      if (state.mode !== 'stats') setMode('stats', { keepHash: true });
+      const [, mode, who] = h.split('/');
+      if (mode && statsModes().some((m) => m.id === mode)) state.statsMode = mode;
+      if (who && onLoad !== 'self') {
+        const [name, plat] = who.split('@');
+        const p = state.statsPlayer;
+        if (!p || p.name.toLowerCase() !== name.toLowerCase() || p.mode !== state.statsMode || (p.platform || 'epic') !== (plat || 'epic')) {
+          state.statsPlatform = PLATFORMS[plat] ? plat : 'epic'; el.statsPlatform.value = state.statsPlatform;
+          el.search.value = state.search.stats = name;
+          lookupPlayer(name, state.statsPlatform, state.statsMode);
+        }
+      } else { buildSidebar(); renderStats(); }
+    } else if (h.startsWith('locker') || h.startsWith('emotes')) {
+      const parts = h.split('/');
+      const [type, g] = parts[0] === 'emotes' ? ['emote', parts[1]] : [parts[1], parts[2]];
+      if (state.mode !== 'locker') setMode('locker', { keepHash: true });
+      if (state.locker && type && state.locker.index.types.some((t) => t.id === type)) {
+        const cur = state.grid.locker.flat[state.grid.locker.selected];
+        if (g && !(cur && cur.type === type && String(cur.g) === g)) gotoLocker(type, g, true);
+        else if (!g && state.lockerType !== type) setLockerType(type);
+      }
     } else if (h.startsWith('map')) {
       if (state.mode !== 'map') setMode('map', { keepHash: true });
       const m = /^map\/@(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)$/.exec(h);
@@ -1681,6 +2325,13 @@
     } else if (state.mode === 'news') {
       el.status.textContent = state.news ? `Fortnite news · ${fmt(state.grid.news.flat.length)} stories · ${state.news.liveCount} in game now · archive updated ${state.news.updated.replace('T', ' ')} · Epic news via Fortnite.GG & fortnite-api.com`
         : state.newsError ? 'News unavailable' : 'Loading Fortnite news...';
+    } else if (state.mode === 'stats') {
+      el.status.textContent = state.stats ? `Season ${state.stats.season} stats · ${state.stats.boards.length} leaderboards · updated ${state.stats.updated.replace('T', ' ')} · player stats & leaderboards: Fortnite.GG`
+        : state.statsError ? 'Stats unavailable' : 'Loading stats...';
+    } else if (state.mode === 'locker') {
+      const T = lockerType();
+      el.status.textContent = T ? `Showing ${fmt(state.grid.locker.flat.length)} of ${fmt(T.items.length)} ${T.name.toLowerCase()} · ${T.video && canHover && lockerPrefs.previews ? 'hover a card to preview · ' : ''}updated ${state.locker.index.updated} · showcase videos & data: Fortnite.GG`
+        : state.lockerError ? 'Locker unavailable' : 'Loading the locker...';
     } else if (state.mode === 'map') {
       el.status.textContent = state.map ? `Season ${state.map.season} map · ${state.mapOn.size} layers on · updated ${state.map.updated} · map & data: Fortnite.GG`
         : state.mapError ? 'Map unavailable' : 'Loading the map...';
@@ -1746,6 +2397,10 @@
       else if (e.target === el.search && el.search.value) { el.search.value = ''; el.search.dispatchEvent(new Event('input')); }
       return;
     }
+    if (state.mode === 'stats') {
+      if (e.target === el.search && e.key === 'Enter') { e.preventDefault(); lookupPlayer(el.search.value, state.statsPlatform); }
+      return;
+    }
     if (state.mode === 'map') {
       if (e.target === el.search && e.key === 'Enter' && state.map) {
         const first = el.sideList.querySelector('[data-goto]');
@@ -1771,8 +2426,13 @@
     } else if (state.mode === 'sprites' && cur >= 0 && !inField && (e.key === ' ' || /^[mM]$/.test(e.key))) {
       e.preventDefault();
       toggleEntry(g.flat[cur], e.key === ' ' ? 'owned' : 'mastered');
+    } else if (state.mode === 'locker' && e.key === ' ' && !inField) {
+      e.preventDefault();
+      const pb = el.detailBody.querySelector('.ep-bar [data-act="ep-play"]');
+      if (pb) pb.click(); else if (cur >= 0) select(cur);
     } else if (e.key === 'Enter' && cur >= 0) {
       const it = g.flat[cur];
+      if (state.mode === 'locker') { window.open(it.page, '_blank', 'noopener'); return; }
       if (state.mode === 'sprites') { toggleEntry(it, 'owned'); return; }
       if (state.mode === 'weapons') { window.open(fggWeapon(it.slug), '_blank', 'noopener'); return; }
       if (state.mode === 'news') { window.open(it.imageLarge || it.image, '_blank', 'noopener'); return; }
@@ -1795,6 +2455,18 @@
     applyFilter('sprites');
   });
 
+  LOCKER_SORTS.forEach((n) => el.lockerSort.insertAdjacentHTML('beforeend', `<option value="${n}">${n === 'Newest' ? 'Sort: newest' : n}</option>`));
+  el.lockerSort.addEventListener('change', () => { state.lockerSort = el.lockerSort.value; applyFilter('locker'); });
+  const paintPreview = () => { el.lockerPreview.classList.toggle('active', lockerPrefs.previews); el.lockerPreview.title = `Hover previews ${lockerPrefs.previews ? 'on' : 'off'}`; };
+  el.lockerPreview.hidden = !canHover;
+  el.lockerPreview.addEventListener('click', () => { lockerPrefs.previews = !lockerPrefs.previews; saveLockerPrefs(); paintPreview(); if (!lockerPrefs.previews) stopHover(); updateStatus(); });
+  el.lockerBar.addEventListener('click', (e) => { const b = e.target.closest('[data-ltype]'); if (b) setLockerType(b.dataset.ltype); });
+  paintPreview();
+
+  el.statsPlatform.addEventListener('change', () => { state.statsPlatform = el.statsPlatform.value; });
+  el.statsGo.addEventListener('click', () => lookupPlayer(el.search.value, state.statsPlatform));
+  el.statsWrap.addEventListener('click', (e) => { const b = e.target.closest('[data-sact]'); if (b) statsAction(b); });
+
   el.mapWrap.querySelector('.map-ctrl').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b || !fmap) return;
@@ -1804,14 +2476,16 @@
 
   // ------------------------------------------------------------------ boot
   state.mode = null;
-  setMode(location.hash.startsWith('#shop') ? 'shop' : location.hash.startsWith('#sprites') ? 'sprites' : location.hash.startsWith('#weapons') ? 'weapons' : location.hash.startsWith('#map') ? 'map' : location.hash.startsWith('#news') ? 'news' : 'browse', { keepHash: true });
+  setMode(location.hash.startsWith('#shop') ? 'shop' : location.hash.startsWith('#sprites') ? 'sprites' : location.hash.startsWith('#weapons') ? 'weapons' : location.hash.startsWith('#map') ? 'map' : location.hash.startsWith('#news') ? 'news' : location.hash.startsWith('#locker') || location.hash.startsWith('#emotes') ? 'locker' : location.hash.startsWith('#stats') ? 'stats' : 'browse', { keepHash: true });
   loadCosmetics();
   loadShop();
   loadSprites();
   loadWeapons();
   loadMap();
   loadNews();
+  loadLocker();
+  loadStats();
 
   // exposed for tests
-  window.__fcb = { md5, webSlug, epicItemUrl, state, progress, toggleEntry, userPhotos, setPhotoFromBlob, seasonEntries, weaponStatsText, getMap: () => fmap, nearestLocation, normalizeNews };
+  window.__fcb = { md5, webSlug, epicItemUrl, state, progress, toggleEntry, userPhotos, setPhotoFromBlob, seasonEntries, weaponStatsText, getMap: () => fmap, nearestLocation, normalizeNews, normalizeLockerType, lockerPrefs, ensureLockerType, deriveStats, statsStore, lookupPlayer };
 })();

@@ -10,6 +10,7 @@ Requires: Python 3.10+ and Pillow.
 """
 import csv
 import gzip
+import html
 import hashlib
 import json
 import math
@@ -20,10 +21,12 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import tkinter.font as tkfont
 import urllib.parse
 import urllib.request
+import wave
 import webbrowser
 from bisect import bisect_right
 from collections import Counter, OrderedDict
@@ -35,7 +38,16 @@ from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageDraw, ImageFilter, ImageTk, features
 
-__version__ = "1.1.0"
+try:  # optional: plays showcase clips inside the app (pip install av); without it clips open in the browser
+    import av
+except Exception:  # pragma: no cover - missing or broken FFmpeg build
+    av = None
+try:  # clip sound (Windows built-in, no extra dependency)
+    import winsound
+except ImportError:  # pragma: no cover - non-Windows
+    winsound = None
+
+__version__ = "1.2.0"
 APP_NAME = "Fortnite Cosmetics Browser"
 REPO_URL = "https://github.com/248Tech/fortnite-cosmetics-browser"
 
@@ -45,6 +57,8 @@ SPRITES_URL = "https://248tech.github.io/fortnite-cosmetics-browser/data/sprites
 WEAPONS_URL = "https://248tech.github.io/fortnite-cosmetics-browser/data/weapons.json"
 MAP_URL = "https://248tech.github.io/fortnite-cosmetics-browser/data/map.json"
 NEWS_URL = "https://248tech.github.io/fortnite-cosmetics-browser/data/news.json"
+LOCKER_URL = "https://248tech.github.io/fortnite-cosmetics-browser/data/locker/"  # index.json + <type>.json
+STATS_URL = "https://248tech.github.io/fortnite-cosmetics-browser/data/stats.json"
 USER_AGENT = f"FortniteCosmeticsBrowser/{__version__} (+{REPO_URL})"
 
 CACHE_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "FortniteCosmeticsBrowser"
@@ -55,6 +69,11 @@ SPRITES_FILE = CACHE_DIR / "sprites.json"
 WEAPONS_FILE = CACHE_DIR / "weapons.json"
 MAP_FILE = CACHE_DIR / "map.json"
 NEWS_FILE = CACHE_DIR / "news.json"
+LOCKER_DIR = CACHE_DIR / "locker"  # last good copy of data/locker/*.json
+STATS_FILE = CACHE_DIR / "stats.json"
+STATS_PLAYERS_FILE = CACHE_DIR / "stats_players.json"  # tracked players, recent searches, lookup history
+CLIP_DIR = CACHE_DIR / "clips"  # downloaded showcase clips (newest CLIP_KEEP kept)
+CLIP_KEEP = 150
 MAP_DIR = CACHE_DIR / "map"  # tile + icon cache
 PROGRESS_FILE = CACHE_DIR / "sprite_progress.json"
 SPRITE_IMG_FILE = CACHE_DIR / "sprite_images.json"
@@ -105,7 +124,23 @@ RARITY_ORDER = ["common", "uncommon", "rare", "epic", "legendary", "mythic",
 SORTS = ["Newest", "Oldest", "Name A-Z", "Name Z-A", "Rarity (high-low)", "Rarity (low-high)"]
 TILE_SIZES = {"S": 92, "M": 116, "L": 150}
 MIN_CATEGORY = 20  # types with fewer items are grouped under "Other"
-MODES = ("browse", "shop", "sprites", "weapons", "map", "news")
+MODES = ("browse", "shop", "sprites", "weapons", "map", "news", "locker", "stats")
+PLATFORMS = {"epic": "Epic", "xbl": "Xbox", "psn": "PlayStation"}
+BOARD_ICONS = {"level": "★", "wins": "♛", "kills": "✚", "time": "◷", "rank": "▲"}
+STATS_MODES_DEFAULT = [{"id": "all", "path": "/stats", "name": "All modes"}]
+LOCKER_SORTS = ("Newest", "Oldest", "Name A-Z", "Rarity (high-low)")
+LOCKER_TAG_NAMES = {"dance": "DANCE", "traversal": "TRAVERSAL", "synced": "SYNCED", "builtin": "BUILT-IN",
+                    "reactive": "REACTIVE", "unreleased": "UNRELEASED", "styles": "STYLES", "animated": "ANIMATED"}
+# (label, tag or special); a filter shows only when it matches something in the current type
+LOCKER_FILTERS = (("All", None), ("This season", "@season"), ("In the shop now", "@shop"), ("Dances", "dance"),
+                  ("Traversal", "traversal"), ("Synced", "synced"), ("Built-in", "builtin"), ("With styles", "styles"),
+                  ("Reactive", "reactive"), ("Animated", "animated"), ("Unreleased", "unreleased"))
+# cosmetic type.backendValue (fortnite-api.com) -> locker type id
+LOCKER_BACKEND = {"AthenaCharacter": "outfit", "AthenaDance": "emote", "AthenaBackpack": "backpack", "AthenaPickaxe": "pickaxe",
+                  "AthenaGlider": "glider", "CosmeticCompanion": "sidekick", "CosmeticShoes": "kicks", "AthenaItemWrap": "wrap",
+                  "AthenaSkyDiveContrail": "contrail", "SparksAura": "aura", "AthenaEmoji": "emoji", "AthenaSpray": "spray",
+                  "AthenaLoadingScreen": "loadingscreen"}
+RARITY_NAMES = {"gaminglegends": "Gaming Legends", "starwars": "Star Wars", "dc": "DC", "icon": "Icon Series", "crew": "Crew"}
 FN_NEWS = "https://www.fortnite.com/news?lang=en-US"
 FGG_NEWS = "https://fortnite.gg/news"
 FGG_MAP = "https://fortnite.gg/"
@@ -1152,6 +1187,727 @@ def fetch_map_image(url, path, mode):
     return im
 
 
+def _season_label(seasons, n):
+    lbl = seasons.get(str(n))
+    m = re.match(r"^C(\d+) (.+)$", lbl or "")
+    if not m:
+        return lbl or f"Season {n}"
+    part = re.sub(r"^MS(\d*)$", lambda x: "Mini Season" + (f" {x.group(1)}" if x.group(1) else ""), m.group(2))
+    part = re.sub(r"^S(\d+|X)$", r"Season \1", part)
+    return f"Chapter {m.group(1)} · {part}"
+
+
+def normalize_locker_type(index, info, data):
+    """data/locker/<type>.json (scraped from Fortnite.GG) -> items with icon / render / clip URLs."""
+    if not isinstance(data, dict) or data.get("schema") != 1 or not isinstance(data.get("items"), list):
+        raise ValueError(f"unsupported {info['id']} data")
+    seasons = index.get("seasons") or {}
+    fill = lambda tpl, x: (tpl or "").replace("{g}", str(x["g"])).replace("{img}", str(x.get("img") or 1))
+    items = []
+    for x in data["items"]:
+        rk = x.get("rarity") or "common"
+        e = {"key": f"{info['id']}:{x['g']}", "type": info["id"], "type_name": info["single"], "g": x["g"],
+             "epic_id": x.get("id") or "", "name": x.get("name") or str(x["g"]),
+             "rarity_key": rk, "rarity": RARITY_NAMES.get(rk, rk.capitalize()), "season": x.get("season") or 0,
+             "season_short": seasons.get(str(x.get("season"))) or f"S{x.get('season')}",
+             "season_label": _season_label(seasons, x.get("season")), "added": x.get("added") or "",
+             "tags": x.get("tags") or [], "set": x.get("set") or "", "has_video": bool(info.get("video")),
+             "source": x.get("source") or "", "price": x.get("price") or 0, "last_seen": x.get("lastSeen") or ""}
+        e["icon"], e["featured"], e["page"] = fill(index.get("icon"), x), fill(index.get("featured"), x), fill(index.get("page"), x)
+        e["video"] = fill(index.get("video"), x) if e["has_video"] else ""
+        e["video_sd"] = fill(index.get("videoSD") or index.get("video"), x) if e["has_video"] else ""
+        e["search"] = " ".join([e["name"], e["epic_id"], e["set"], e["rarity"], e["source"], e["season_short"],
+                                *(LOCKER_TAG_NAMES.get(t, t) for t in e["tags"])]).lower()
+        items.append(e)
+    return {**info, "items": items, "current": max((e["season"] for e in items), default=0)}
+
+
+def fetch_clip(url):
+    """Download a showcase clip once to %LOCALAPPDATA%\\...\\clips and return the local path."""
+    CLIP_DIR.mkdir(parents=True, exist_ok=True)
+    path = CLIP_DIR / (url_key(url) + ".mp4")
+    if not path.exists():
+        data = http_get(url, timeout=60)
+        tmp = path.with_suffix(f".{threading.get_ident()}.tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+        try:  # keep the cache small
+            clips = sorted(CLIP_DIR.glob("*.mp4"), key=lambda p_: p_.stat().st_mtime, reverse=True)
+            for old in clips[CLIP_KEEP:]:
+                old.unlink()
+        except OSError:
+            pass
+    else:
+        os.utime(path)
+    return path
+
+
+AUDIO_RATE = 44100  # clip sound is decoded to 16-bit stereo PCM at this rate
+
+
+def decode_clip_audio(path):
+    """The clip's sound track as raw 16-bit stereo PCM (b"" if it has none or it is silent).
+
+    Every Fortnite.GG clip carries an AAC track, but many are silence, and the items file has no reliable
+    "has sound" flag, so silence is detected here from the samples (peak below ~0.5% of full scale)."""
+    out = bytearray()
+    with av.open(str(path)) as box:
+        if not box.streams.audio:
+            return b""
+        rs = av.AudioResampler(format="s16", layout="stereo", rate=AUDIO_RATE)
+        for fr in box.decode(box.streams.audio[0]):
+            for f2 in rs.resample(fr):
+                out += bytes(f2.planes[0])[:f2.samples * 4]
+        for f2 in rs.resample(None):
+            out += bytes(f2.planes[0])[:f2.samples * 4]
+    pcm = bytes(out)
+    samples = memoryview(pcm).cast("h") if len(pcm) % 2 == 0 else memoryview(b"").cast("h")
+    step = max(1, len(samples) // 200000)  # sample ~200k points: fast and plenty to find any sound
+    if not samples or max(abs(samples[i]) for i in range(0, len(samples), step)) < 160:
+        return b""
+    return pcm
+
+
+class ClipAudio:
+    """Plays decoded clip sound through winsound from any offset (one sound at a time for the whole app).
+
+    winsound can't play from memory asynchronously, so the PCM from the offset is written to a small WAV
+    (alternating between two files so the one still open by the previous sound is never rewritten).
+    0.5x speed is a WAV at half the sample rate: slower and lower, like a slow-motion replay."""
+    owner = None
+    _flip = 0
+
+    @classmethod
+    def play(cls, owner, pcm, pos, speed=1.0):
+        if not winsound or not pcm:
+            return False
+        cls.stop()
+        off = max(0, int(pos * AUDIO_RATE)) * 4
+        if off >= len(pcm):
+            return False
+        cls._flip ^= 1
+        path = CLIP_DIR / f"_sound{cls._flip}.wav"
+        try:
+            CLIP_DIR.mkdir(parents=True, exist_ok=True)
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(2)
+                w.setsampwidth(2)
+                w.setframerate(int(AUDIO_RATE * speed))
+                w.writeframes(pcm[off:])
+            winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+            cls.owner = owner
+            return True
+        except Exception:
+            return False
+
+    @classmethod
+    def stop(cls, owner=None):
+        if owner is not None and cls.owner is not owner:
+            return
+        if winsound and cls.owner is not None:
+            try:
+                winsound.PlaySound(None, 0)
+            except Exception:
+                pass
+        cls.owner = None
+
+
+class ClipPlayer:
+    """Plays a showcase clip in the detail panel: cached download -> PyAV decode thread -> frames shown on the Tk
+    thread on the clip's own clock, with the sound track played through ClipAudio and kept in step with it."""
+
+    def __init__(self, app, parent, e, width):
+        self.app, self.e, s = app, e, app.scale
+        self.w, self.h = width, round(width * 426 / 380)  # Fortnite.GG clips are 380x426 (SD) / 1142x1282 (HD)
+        self.hd = bool(app.settings.get("emote_hd"))
+        self.speed = 1.0
+        self.paused, self.dead = False, False
+        self.q = queue.Queue(maxsize=8)
+        self.stop = threading.Event()
+        self.t0 = self.pause_at = None
+        self.nxt, self.photo, self.job = None, None, None
+        self.pos = 0.0
+        self.pcm = None
+        self.sound = app.settings.get("emote_sound", True) and winsound is not None
+        self.silent = False  # set once the decoded track turns out to be silence
+        self.frame = tk.Frame(parent, bg=PANEL)
+        self.frame.pack(fill="x", pady=(0, int(14 * s)))
+        bg = rarity_bg(e["rarity_key"])
+        self.poster_ck = (e["icon"], self.w, bg, "all")
+        poster = app.request_image(e["icon"], 512, self.w, bg, check=False, corners="all")
+        self.blank = tk.PhotoImage(width=self.w, height=self.h)  # keeps the label sized in pixels
+        self.screen = tk.Label(self.frame, bg=bg[1], bd=0, cursor="hand2", image=poster or self.blank,
+                               width=self.w, height=self.h)
+        self.screen.pack()
+        self.poster = poster
+        bar = tk.Frame(self.frame, bg=PANEL_2)
+        bar.pack(fill="x")
+        self.btn_play = self._btn(bar, "‖" if av else "▶  Play animation", self.toggle)
+        self.btn_speed = self._btn(bar, "1×", self.toggle_speed) if av else None
+        self.btn_hd = self._btn(bar, "HD", self.toggle_hd) if av else None
+        self.time_lbl = tk.Label(bar, text="", bg=PANEL_2, fg=MUTED, font=app.f_small, padx=6)
+        self.time_lbl.pack(side="left")
+        self.btn_sound = None
+        if av and winsound:
+            self.btn_sound = self._btn(bar, "♪ Sound", self.toggle_sound, side="right")
+        else:
+            self._btn(bar, "♪ With sound", lambda: app.open_url(e["video"]), side="right")
+        self._paint()
+        self.screen.bind("<Button-1>", lambda ev: self.toggle())
+        self.frame.bind("<Destroy>", lambda ev: self.close() if ev.widget is self.frame else None)
+        if av:
+            self.status("Loading animation...")
+            self._start()
+            self.job = app.root.after(15, self._tick)
+        else:
+            self.status("Opens in your browser")
+
+    def _btn(self, parent, text, cmd, side="left"):
+        b = tk.Label(parent, text=text, bg=PANEL_2, fg=FG, font=self.app.f_bold, padx=10, pady=4, cursor="hand2")
+        b.pack(side=side)
+        b.bind("<Button-1>", lambda ev: cmd())
+        b.bind("<Enter>", lambda ev: b.configure(bg=HOVER) if b.cget("bg") == PANEL_2 else None)
+        b.bind("<Leave>", lambda ev: b.configure(bg=PANEL_2) if b.cget("bg") == HOVER else None)
+        return b
+
+    def _paint(self):
+        if self.btn_hd is not None:
+            self.btn_hd.configure(bg=ACCENT if self.hd else PANEL_2, fg=ACCENT_FG if self.hd else FG)
+        if self.btn_speed is not None:
+            self.btn_speed.configure(text="0.5×" if self.speed == 0.5 else "1×")
+        if av:
+            self.btn_play.configure(text="▶" if self.paused else "‖")
+        if self.btn_sound is not None:
+            if self.silent:
+                self.btn_sound.configure(text="No sound", bg=PANEL_2, fg=MUTED_2, cursor="")
+            else:
+                self.btn_sound.configure(text="♪ Sound on" if self.sound else "♪ Sound off",
+                                         bg=ACCENT if self.sound else PANEL_2, fg=ACCENT_FG if self.sound else MUTED)
+
+    def status(self, text):
+        if not self.dead:
+            self.time_lbl.configure(text=text)
+
+    def url(self):
+        return self.e["video"] if self.hd else self.e["video_sd"]
+
+    def set_poster(self, ph):
+        if self.photo is None and not self.dead:
+            self.poster = ph
+            self.screen.configure(image=ph, width=self.w, height=self.h)
+
+    # -- decoding thread
+    def _start(self):
+        self.stop.set()
+        ClipAudio.stop(self)
+        self.stop = stop = threading.Event()
+        self.q = q = queue.Queue(maxsize=8)
+        self.t0, self.nxt, self.pcm = None, None, None
+        url, w, h = self.url(), self.w, self.h
+        want_audio = winsound is not None
+
+        def put(item):
+            while not stop.is_set():
+                try:
+                    q.put(item, timeout=0.2)
+                    return True
+                except queue.Full:
+                    pass
+            return False
+
+        def work():
+            try:
+                path = fetch_clip(url)
+            except Exception as ex:
+                if url != self.e["video"]:
+                    try:
+                        path = fetch_clip(self.e["video"])
+                    except Exception:
+                        put(("error", str(ex)))
+                        return
+                else:
+                    put(("error", str(ex)))
+                    return
+            if want_audio:
+                try:
+                    put(("audio", decode_clip_audio(path), 0))
+                except Exception:
+                    pass  # silent clip is still worth showing
+            while not stop.is_set():
+                try:
+                    with av.open(str(path)) as box:
+                        st = box.streams.video[0]
+                        st.thread_type = "AUTO"
+                        tb = float(st.time_base or 0) or 1 / 30
+                        dur = float(box.duration or 0) / 1_000_000 if box.duration else 0
+                        for fr in box.decode(st):
+                            if stop.is_set():
+                                return
+                            img = fr.to_image().resize((w, h), Image.BILINEAR)
+                            if not put((float(fr.pts or 0) * tb, img, dur)):
+                                return
+                except Exception as ex:
+                    put(("error", str(ex)))
+                    return
+                if not put(("loop", None, 0)):
+                    return
+
+        threading.Thread(target=work, daemon=True).start()
+
+    # -- Tk thread
+    def _tick(self):
+        if self.dead:
+            return
+        if not self.paused:
+            now = time.perf_counter()
+            for _ in range(4):
+                if self.nxt is None:
+                    try:
+                        self.nxt = self.q.get_nowait()
+                    except queue.Empty:
+                        break
+                t, img, dur = self.nxt
+                if t == "error":
+                    self.nxt = None
+                    self.status("No animation available")
+                    break
+                if t == "audio":
+                    self.nxt, self.pcm = None, img
+                    if self.silent != (not img):
+                        self.silent = not img
+                        self._paint()
+                    if self.t0 is not None:
+                        self._sound_from(self._clock_pos())
+                    continue
+                if t == "loop":
+                    self.nxt, self.t0 = None, None
+                    continue
+                if self.t0 is None:
+                    self._sound_from(t)  # (re)starts the clock at this frame, with sound
+                due = self.t0 + t / self.speed
+                if due > now:
+                    break
+                self.photo = ImageTk.PhotoImage(img)
+                self.screen.configure(image=self.photo, width=self.w, height=self.h)
+                self.pos, self.nxt = t, None
+                sec = int(t)
+                self.status(f"{sec // 60}:{sec % 60:02d}" + (f" / {int(dur) // 60}:{int(dur) % 60:02d}" if dur else ""))
+                if now - due < 0.05:
+                    break
+        self.job = self.app.root.after(12, self._tick)
+
+    def _clock_pos(self):
+        if self.t0 is None:
+            return self.pos
+        ref = self.pause_at if self.paused else time.perf_counter()
+        return max(0.0, (ref - self.t0) * self.speed)
+
+    def _sound_from(self, pos):
+        """Start the clip clock at `pos` seconds and, if sound is on, the sound track from the same point."""
+        if self.sound and self.pcm and not self.paused and not self.dead:
+            ClipAudio.play(self, self.pcm, pos, self.speed)
+        else:
+            ClipAudio.stop(self)
+        self.t0 = time.perf_counter() - pos / self.speed
+
+    def toggle(self):
+        if not av:
+            self.app.open_url(self.url())
+            return
+        if not self.paused:
+            self.pause_at = time.perf_counter()
+            self.paused = True
+            ClipAudio.stop(self)
+        else:
+            pos = self._clock_pos()
+            self.paused = False
+            if self.t0 is not None:
+                self._sound_from(pos)
+        self._paint()
+
+    def toggle_speed(self):
+        pos = self._clock_pos()
+        self.speed = 0.5 if self.speed == 1.0 else 1.0
+        if self.t0 is not None:
+            if self.paused:
+                self.t0 = self.pause_at - pos / self.speed
+            else:
+                self._sound_from(pos)
+        self._paint()
+
+    def toggle_sound(self):
+        if self.silent:
+            return
+        self.sound = not self.sound
+        self.app.settings["emote_sound"] = self.sound
+        self.app._save_settings()
+        if self.t0 is not None and not self.paused:
+            self._sound_from(self._clock_pos())
+        elif not self.sound:
+            ClipAudio.stop(self)
+        self._paint()
+
+    def toggle_hd(self):
+        self.hd = not self.hd
+        self.app.settings["emote_hd"] = self.hd
+        self.app._save_settings()
+        self._paint()
+        self.status("Loading HD..." if self.hd else "Loading...")
+        self._start()
+
+    def close(self):
+        if self.dead:
+            return
+        self.dead = True
+        self.stop.set()
+        ClipAudio.stop(self)
+        if self.job:
+            try:
+                self.app.root.after_cancel(self.job)
+            except Exception:
+                pass
+        if self.app.clip_player is self:
+            self.app.clip_player = None
+
+
+def fmt_minutes(m):
+    m = int(round(m or 0))
+    return f"{m // 60:,}h {m % 60}m" if m >= 60 else f"{m}m"
+
+
+def derive_stats(st):
+    """Same formulas as Fortnite.GG's stats card."""
+    matches, wins, kills = st.get("matches") or 0, st.get("wins") or 0, st.get("kills") or 0
+    tm = st.get("minutes") or st.get("time") or 0
+    deaths = matches - wins
+    return {"win_pct": round(wins / matches * 100, 1) if matches else 0,
+            "kd": round(kills / deaths, 2) if deaths > 0 else kills,
+            "kpm": round(kills / matches, 2) if matches else 0,
+            "time": tm, "avg_match": tm / matches if matches else 0}
+
+
+def player_key(name, platform):
+    return f"{platform or 'epic'}:{str(name).lower()}"
+
+
+class StatsStore:
+    """Tracked players, recent searches and a snapshot per lookup (for "since last check" progress)."""
+    FIELDS = ("level", "wins", "matches", "kills", "time", "rank_percent", "rank_text")
+
+    def __init__(self, path):
+        self.path = path
+        try:
+            d = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            d = {}
+        self.tracked = d.get("tracked") if isinstance(d.get("tracked"), list) else []
+        self.recent = d.get("recent") if isinstance(d.get("recent"), list) else []
+        self.history = d.get("history") if isinstance(d.get("history"), dict) else {}
+
+    def save(self):
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"tracked": self.tracked, "recent": self.recent, "history": self.history}), encoding="utf-8")
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    def record(self, name, platform, mode, st):
+        lst = self.history.setdefault(player_key(name, platform), {}).setdefault(mode, [])
+        snap = {"t": datetime.now(timezone.utc).isoformat(timespec="seconds"), "level": st.get("level"),
+                "wins": st.get("wins") or 0, "matches": st.get("matches") or 0, "kills": st.get("kills") or 0,
+                "time": st.get("minutes") or st.get("time") or 0, "rank_text": st.get("rank_text") or "",
+                "rank_percent": st.get("rank_percent") or 0}
+        if lst and all(lst[-1].get(f) == snap[f] for f in self.FIELDS):
+            lst[-1]["t"] = snap["t"]
+        else:
+            lst.append(snap)
+        del lst[:-50]
+        self.recent = [{"name": name, "platform": platform}] + [
+            r for r in self.recent if player_key(r["name"], r["platform"]) != player_key(name, platform)][:7]
+        self.save()
+        return list(lst)
+
+    def is_tracked(self, name, platform):
+        return any(player_key(r["name"], r["platform"]) == player_key(name, platform) for r in self.tracked)
+
+    def toggle_tracked(self, name, platform):
+        if self.is_tracked(name, platform):
+            self.tracked = [r for r in self.tracked if player_key(r["name"], r["platform"]) != player_key(name, platform)]
+        else:
+            self.tracked = (self.tracked + [{"name": name, "platform": platform}])[-20:]
+        self.save()
+
+
+class StatsView:
+    """Stats page (player card + leaderboards) built from Tk widgets in a scroll frame. Quacks like VirtualGrid."""
+
+    def __init__(self, app, parent):
+        self.app = app
+        self.frame = tk.Frame(parent, bg=BG)
+        self.sf = ScrollFrame(self.frame, bg=BG)
+        self.sf.pack(fill="both", expand=True, padx=int(14 * app.scale), pady=(0, int(8 * app.scale)))
+        self.canvas = self.sf.canvas
+        self.flat, self.sections, self.selected, self.text_h, self.empty_text = [], [], None, None, ""
+        self.on_select = lambda it: None
+        self.open_boards, self.wait, self._job, self._w = set(), set(), None, 0
+        self.photos = []
+        self.frame.bind("<Configure>", self._resized)
+
+    # ---- VirtualGrid duck-typing
+    def layout(self):
+        self.render()
+
+    def redraw(self):
+        self.render()
+
+    def set_sections(self, *a, **k):
+        self.render()
+
+    def select_key(self, *a, **k):
+        return False
+
+    def move(self, d):
+        pass
+
+    def scroll_to_section(self, title):
+        pass
+
+    def _resized(self, e):
+        if abs(e.width - self._w) > 40:
+            self._w = e.width
+            self.schedule()
+
+    def schedule(self, ms=60):
+        if self._job:
+            self.app.root.after_cancel(self._job)
+        self._job = self.app.root.after(ms, self.render)
+
+    # ---- widgets
+    def _click(self, w, cmd):
+        w.configure(cursor="hand2")
+        w.bind("<Button-1>", lambda e: cmd())
+
+    def _chip(self, parent, text, cmd, active=False, bg=PANEL_2):
+        b = tk.Label(parent, text=text, bg=ACCENT if active else bg, fg=ACCENT_FG if active else FG_2,
+                     font=self.app.f_chip, padx=12, pady=4)
+        self._click(b, cmd)
+        return b
+
+    def _img(self, url, px):
+        if not url:
+            return None
+        ph = self.app.request_image(url, 128, px, None, check=False)
+        if ph is None:
+            self.wait.add((url, px, None, None))
+        return ph
+
+    def render(self):
+        self._job = None
+        app, s = self.app, self.app.scale
+        top = self.canvas.yview()[0]
+        inner = self.sf.inner
+        for w in inner.winfo_children():
+            w.destroy()
+        width = max(400, self.canvas.winfo_width() or 900)
+        data, p = app.stats_data, app.stats_player
+        # hero
+        hero = tk.Frame(inner, bg="#2b3d66", padx=int(18 * s), pady=int(14 * s))
+        hero.pack(fill="x", pady=(int(4 * s), int(10 * s)))
+        tk.Label(hero, text="FORTNITE STATS", bg="#2b3d66", fg=FG, font=app.f_hero, anchor="w").pack(anchor="w")
+        tk.Label(hero, text=f"Season {(data or {}).get('season', '')} stats and leaderboards from Fortnite.GG. "
+                            "Type an Epic, Xbox or PlayStation name in the search box and press Enter, or click any player.",
+                 bg="#2b3d66", fg="#e8e9ee", font=app.f_base, anchor="w", justify="left",
+                 wraplength=width - int(60 * s)).pack(anchor="w", pady=(int(2 * s), 0))
+        if app.stats_store.tracked:
+            row = tk.Frame(hero, bg="#2b3d66")
+            row.pack(anchor="w", pady=(int(10 * s), 0))
+            for r in app.stats_store.tracked:
+                self._chip(row, f"★ {r['name']}", lambda r=r: app.lookup_player(r["name"], r["platform"]),
+                           bg="#1f2c4d").pack(side="left", padx=(0, 6))
+        # modes
+        chips = tk.Frame(inner, bg=BG)
+        chips.pack(fill="x", pady=(0, int(10 * s)))
+        for m in app.stats_modes():
+            self._chip(chips, m["name"].upper(), lambda m=m: app.set_stats_mode(m["id"]),
+                       active=m["id"] == app.stats_mode).pack(side="left", padx=(0, 6))
+        if p:
+            self._player_card(inner, p, width)
+        # leaderboards
+        mode = app.stats_mode_obj()
+        hd = tk.Frame(inner, bg=BG)
+        hd.pack(fill="x", pady=(int(4 * s), int(8 * s)))
+        tk.Label(hd, text=f"{mode['name'].upper()} LEADERBOARDS", bg=BG, fg=FG, font=app.f_header).pack(side="left")
+        if data:
+            tk.Label(hd, text=f"top 40  ·  updated {data['updated'].replace('T', ' ')}", bg=BG, fg=MUTED,
+                     font=app.f_small).pack(side="left", padx=(12, 0), pady=(int(6 * s), 0))
+        boards = [b for b in (data or {}).get("boards", []) if b["mode"] == app.stats_mode]
+        if not data:
+            tk.Label(inner, text=(f"Couldn't load leaderboards: {app.stats_error}" if app.stats_error else "Loading leaderboards..."),
+                     bg=BG, fg=MUTED, font=app.f_base).pack(anchor="w")
+        grid = tk.Frame(inner, bg=BG)
+        grid.pack(fill="x")
+        cols = max(1, min(4, width // int(270 * s)))
+        for c in range(cols):
+            grid.columnconfigure(c, weight=1, uniform="b")
+        for i, b in enumerate(boards):
+            self._board(grid, b).grid(row=i // cols, column=i % cols, sticky="new", padx=int(4 * s), pady=int(4 * s))
+        self.sf.bind_tree(inner)
+        self.sf.update_idletasks()
+        self.canvas.yview_moveto(top)
+
+    def _player_card(self, parent, p, width):
+        app, s = self.app, self.app.scale
+        card = tk.Frame(parent, bg=PANEL, padx=int(16 * s), pady=int(14 * s))
+        card.pack(fill="x", pady=(0, int(14 * s)))
+        head = tk.Frame(card, bg=PANEL)
+        head.pack(fill="x")
+        tk.Label(head, text=p["name"], bg=PANEL, fg=FG, font=app.f_title, anchor="w").pack(side="left")
+        mode = app.stats_mode_obj(p["mode"])
+        season = (app.stats_data or {}).get("season")
+        if p.get("stats"):
+            tracked = app.stats_store.is_tracked(p["name"], p["platform"])
+            self._chip(head, "★ TRACKING" if tracked else "☆ TRACK", app.toggle_tracked_player,
+                       active=tracked).pack(side="right")
+        tk.Label(card, text=f"{PLATFORMS.get(p['platform'], 'Epic')}  ·  {mode['name']}" + (f"  ·  Season {season}" if season else ""),
+                 bg=PANEL, fg=MUTED, font=app.f_small, anchor="w").pack(anchor="w", pady=(0, int(10 * s)))
+        page = app.stats_url("playerPage", p["name"], p["platform"], p["mode"])
+        if p.get("loading"):
+            tk.Label(card, text=f"Looking up {p['name']}...", bg=PANEL, fg=MUTED, font=app.f_base).pack(anchor="w")
+            return
+        if p.get("error"):
+            msg = tk.Label(card, text=f"{p['error']}\nCheck the spelling and platform (Xbox / PlayStation names need the matching platform).  Open on Fortnite.GG ↗",
+                           bg=PANEL_2, fg=FG_2, font=app.f_base, justify="left", anchor="w", padx=12, pady=8,
+                           wraplength=width - int(80 * s))
+            msg.pack(fill="x")
+            self._click(msg, lambda: app.open_in_chrome(page))
+            return
+        st = p["stats"]
+        dv = derive_stats(st)
+        if p["mode"] != "arena" and not st.get("matches"):
+            tk.Label(card, text=f"No {mode['name']} matches this season yet. Try another mode above.", bg=PANEL_2, fg=FG_2,
+                     font=app.f_base, anchor="w", padx=12, pady=8).pack(fill="x")
+            return
+        ranked = p["mode"] == "arena" or p["mode"].startswith("ranked")
+        if ranked and st.get("rank_text"):
+            rk = tk.Frame(card, bg=PANEL_2, padx=12, pady=8)
+            rk.pack(fill="x", pady=(0, int(10 * s)))
+            tpl = (app.stats_data or {}).get("rankIcon")
+            ph = self._img(tpl.replace("{rank}", str(st.get("rank") or 0)) if tpl else "", int(48 * s))
+            if ph:
+                self.photos.append(ph)
+                tk.Label(rk, image=ph, bg=PANEL_2).pack(side="left", padx=(0, 10))
+            box = tk.Frame(rk, bg=PANEL_2)
+            box.pack(side="left")
+            tk.Label(box, text=st["rank_text"], bg=PANEL_2, fg=FG, font=app.f_header, anchor="w").pack(anchor="w")
+            sub = f"{st['rank_percent']}% to next rank" if st.get("rank_percent") else "Current rank"
+            if st.get("rank_ranking"):
+                sub += f"  ·  #{st['rank_ranking']:,}"
+            tk.Label(box, text=sub, bg=PANEL_2, fg="#31eafe", font=app.f_small, anchor="w").pack(anchor="w")
+        if p["mode"] != "arena":
+            tiles = [("WINS", f"{st.get('wins', 0):,}"), ("WIN RATE", f"{dv['win_pct']}%"), ("MATCHES", f"{st.get('matches', 0):,}"),
+                     ("K/D", str(dv["kd"])), ("KILLS / MATCH", str(dv["kpm"])), ("KILLS", f"{st.get('kills', 0):,}"),
+                     ("TIME PLAYED", fmt_minutes(dv["time"])), ("AVG MATCH", fmt_minutes(dv["avg_match"]))]
+            if st.get("level") is not None and not ranked:
+                tiles.append(("LEVEL", f"{st['level']:,}"))
+            grid = tk.Frame(card, bg=PANEL)
+            grid.pack(fill="x")
+            cols = max(2, min(9, (width - int(40 * s)) // int(128 * s)))
+            for c in range(cols):
+                grid.columnconfigure(c, weight=1, uniform="t")
+            for i, (k, v) in enumerate(tiles):
+                t = tk.Frame(grid, bg=PANEL_2, padx=10, pady=6)
+                t.grid(row=i // cols, column=i % cols, sticky="nsew", padx=3, pady=3)
+                tk.Label(t, text=k, bg=PANEL_2, fg=MUTED, font=app.f_pill, anchor="w").pack(anchor="w")
+                tk.Label(t, text=v, bg=PANEL_2, fg=FG, font=app.f_stat, anchor="w").pack(anchor="w")
+        hist = p.get("history") or []
+        if len(hist) >= 2:
+            a, b = hist[-2], hist[-1]
+            parts = []
+            for f, label in (("wins", "wins"), ("kills", "kills"), ("matches", "matches"), ("level", "levels")):
+                d = (b.get(f) or 0) - (a.get(f) or 0)
+                if d:
+                    parts.append(f"{'+' if d > 0 else ''}{d:,} {label}")
+            dt = (b.get("time") or 0) - (a.get("time") or 0)
+            if dt > 0:
+                parts.append(f"+{fmt_minutes(dt)} played")
+            if parts:
+                try:
+                    since = datetime.fromisoformat(a["t"]).astimezone().strftime("%b %d, %I:%M %p")
+                except ValueError:
+                    since = "last check"
+                tk.Label(card, text=f"Since {since}:   " + "   ·   ".join(parts), bg="#1d2a20", fg=GREEN, font=app.f_bold,
+                         anchor="w", padx=12, pady=6).pack(fill="x", pady=(int(10 * s), 0))
+            cw, ch = width - int(70 * s), int(70 * s)
+            cv = tk.Canvas(card, bg=PANEL_2, height=ch, highlightthickness=0)
+            cv.pack(fill="x", pady=(int(8 * s), 0))
+            for f, color in (("kills", RED), ("wins", ACCENT)):
+                vals = [h.get(f) or 0 for h in hist]
+                lo, hi = min(vals), max(vals)
+                span = (hi - lo) or 1
+                pts = []
+                for i, v in enumerate(vals):
+                    pts += [6 + i / (len(vals) - 1) * (cw - 12), ch - 6 - (v - lo) / span * (ch - 12)]
+                cv.create_line(*pts, fill=color, width=2, smooth=False)
+            tk.Label(card, text=f"━ Wins   ━ Kills   ·   {len(hist)} checks", bg=PANEL, fg=MUTED, font=app.f_small,
+                     anchor="w").pack(anchor="w", pady=(2, 0))
+        at = p.get("at")
+        foot = tk.Label(card, text=f"Checked {at.strftime('%I:%M %p').lstrip('0') if at else ''}   ·   Fortnite.GG stats card ↗",
+                        bg=PANEL, fg=MUTED_2, font=app.f_small, anchor="w")
+        foot.pack(anchor="w", pady=(int(8 * s), 0))
+        self._click(foot, lambda: app.open_in_chrome(page))
+
+    def _board(self, parent, b):
+        app, s = self.app, self.app.scale
+        f = tk.Frame(parent, bg=PANEL, padx=int(8 * s), pady=int(8 * s))
+        hd = tk.Frame(f, bg=PANEL)
+        hd.pack(fill="x", pady=(0, int(6 * s)))
+        tk.Label(hd, text=f"{BOARD_ICONS.get(b['key'], '■')}  {b['title'].replace(' Leaderboard', '').upper()}", bg=PANEL, fg=FG,
+                 font=app.f_chip).pack(side="left")
+        tk.Label(hd, text=b["column"].upper(), bg=PANEL, fg=MUTED, font=app.f_pill).pack(side="right")
+        key = f"{b['mode']}/{b['key']}"
+        is_open = key in self.open_boards
+        icon_tpl = (app.stats_data or {}).get("rankIcon")
+        for i, r in enumerate(b["rows"] if is_open else b["rows"][:10]):
+            bg = PANEL if i % 2 else "#26272b"
+            row = tk.Frame(f, bg=bg)
+            row.pack(fill="x")
+            top3 = r["rank"] <= 3
+            pos = tk.Label(row, text=str(r["rank"]), width=3, bg=ACCENT if top3 else PANEL_2, fg=ACCENT_FG if top3 else MUTED,
+                           font=app.f_pill)
+            pos.pack(side="left", padx=(4, 8), pady=3)
+            v = r["value"]
+            if b["key"] == "time":
+                val = fmt_minutes(v)
+            elif b["key"] == "rank":
+                val = f"{v.get('text', '')} {v['pct']:g}%" if isinstance(v, dict) and v.get("pct") is not None else (v or {}).get("text", "")
+            else:
+                val = f"{v:,}" if isinstance(v, (int, float)) else str(v)
+            vl = tk.Label(row, text=val, bg=bg, fg=FG, font=app.f_bold)
+            vl.pack(side="right", padx=(4, 6))
+            widgets = [row, pos, vl]
+            if b["key"] == "rank" and isinstance(v, dict) and v.get("rank") is not None and icon_tpl:
+                ph = self._img(icon_tpl.replace("{rank}", str(v["rank"])), int(18 * s))
+                if ph:
+                    self.photos.append(ph)
+                    il = tk.Label(row, image=ph, bg=bg)
+                    il.pack(side="right")
+                    widgets.append(il)
+            name = r["name"] + ("  [XBOX]" if r.get("platform") == "xbl" else "  [PSN]" if r.get("platform") == "psn" else "")
+            nl = tk.Label(row, text=app.ellipsize(name, app.f_base, int(150 * s)), bg=bg, fg=FG_2, font=app.f_base, anchor="w")
+            nl.pack(side="left", fill="x", expand=True)
+            widgets.append(nl)
+            for w in widgets:
+                self._click(w, lambda r=r: app.lookup_player(r["name"], r.get("platform") or "epic"))
+        if len(b["rows"]) > 10:
+            more = tk.Label(f, text="SHOW TOP 10" if is_open else f"SHOW TOP {len(b['rows'])}", bg=PANEL_2, fg=MUTED,
+                            font=app.f_pill, pady=5)
+            more.pack(fill="x", pady=(int(6 * s), 0))
+            self._click(more, lambda: (self.open_boards.symmetric_difference_update({key}), self.render()))
+        return f
+
+
 class MapView:
     """Pan/zoom map on a Tk canvas: Fortnite.GG tiles, clustered icon markers, lines, labels.
 
@@ -1652,6 +2408,11 @@ class App:
         self.weapons, self.weapon_error, self.weapon_rarity = None, None, {}
         self.map_data, self.map_error = None, None
         self.news, self.news_error = None, None
+        self.locker, self.locker_error, self.locker_filter, self.clip_player = None, None, "All", None
+        self.locker_type = self.settings.get("locker_type") or "outfit"
+        self.locker_wait = {}  # type id -> callbacks to run once its file is loaded
+        self.stats_data, self.stats_error, self.stats_mode, self.stats_player, self.stats_req = None, None, "all", None, 0
+        self.stats_store = StatsStore(STATS_PLAYERS_FILE)
         self.map_on = set(self.settings.get("map_layers") or []) if isinstance(self.settings.get("map_layers"), list) else None
         self.sprite_photos = {}
         self.sprite_imgs = {}
@@ -1682,6 +2443,8 @@ class App:
         self.load_weapons()
         self.load_map()
         self.load_news()
+        self.load_locker()
+        self.load_stats()
         root.after(30, self._poll)
         root.after(1000, self._tick)
 
@@ -1697,6 +2460,12 @@ class App:
             data = {"tile": self.tile_key, "mode": self.mode}
             if getattr(self, "map_on", None) is not None:
                 data["map_layers"] = sorted(self.map_on)
+            if getattr(self, "locker_type", None):
+                data["locker_type"] = self.locker_type
+            if self.settings.get("emote_hd"):
+                data["emote_hd"] = True
+            if self.settings.get("emote_sound") is False:
+                data["emote_sound"] = False
             SETTINGS_FILE.write_text(json.dumps(data), encoding="utf-8")
         except Exception:
             pass
@@ -1777,6 +2546,10 @@ class App:
         self.nav_map.pack(fill="x")
         self.nav_news = SideRow(side, "NEWS", "", lambda: self.set_mode("news"), self.f_nav, self.f_small, pady=8)
         self.nav_news.pack(fill="x")
+        self.nav_locker = SideRow(side, "LOCKER", "", lambda: self.set_mode("locker"), self.f_nav, self.f_small, pady=8)
+        self.nav_locker.pack(fill="x")
+        self.nav_stats = SideRow(side, "STATS", "", lambda: self.set_mode("stats"), self.f_nav, self.f_small, pady=8)
+        self.nav_stats.pack(fill="x")
         self.side_heading = tk.Label(side, text="", bg=SIDEBAR, fg=MUTED, font=self.f_section,
                                      anchor="w", padx=16)
         self.side_heading.pack(fill="x", pady=(int(18 * s), int(4 * s)))
@@ -1862,6 +2635,21 @@ class App:
         cb.pack(side="left")
         cb.bind("<<ComboboxSelected>>", lambda e: self.apply_filter("weapons"))
 
+        self.locker_bar = tk.Frame(bar, bg=BG)
+        tk.Label(self.locker_bar, text="SORT BY", bg=BG, fg=MUTED, font=self.f_section).pack(side="left", padx=(16, 6))
+        self.locker_sort_var = tk.StringVar(value=LOCKER_SORTS[0])
+        cb = ttk.Combobox(self.locker_bar, textvariable=self.locker_sort_var, values=LOCKER_SORTS, state="readonly", width=16)
+        cb.pack(side="left")
+        cb.bind("<<ComboboxSelected>>", lambda e: self.apply_filter("locker"))
+
+        self.stats_bar = tk.Frame(bar, bg=BG)
+        tk.Label(self.stats_bar, text="PLATFORM", bg=BG, fg=MUTED, font=self.f_section).pack(side="left", padx=(16, 6))
+        self.stats_platform_var = tk.StringVar(value="Epic")
+        ttk.Combobox(self.stats_bar, textvariable=self.stats_platform_var, values=list(PLATFORMS.values()),
+                     state="readonly", width=12).pack(side="left")
+        ttk.Button(self.stats_bar, text="Look up", style="Accent.TButton",
+                   command=lambda: self.lookup_player(self.search_vars["stats"].get(), self._stats_platform())).pack(side="left", padx=(10, 0))
+
         right = tk.Frame(bar, bg=BG)
         right.pack(side="right")
         self.refresh_btn = ttk.Button(right, text="↻", width=3, command=self.refresh_all)
@@ -1918,6 +2706,16 @@ class App:
         self.hero_chips = tk.Frame(self.sprite_hero, bg=BG)
         self.hero_chips.pack(pady=(int(4 * s), int(6 * s)))
 
+        # locker type chips (Outfits, Emotes, Back Blings, ...)
+        self.locker_chips = tk.Frame(main, bg=BG)
+        self._chips_w = 0
+
+        def chips_resize(e):
+            if self.mode == "locker" and abs(e.width - self._chips_w) > 60:
+                self._chips_w = e.width
+                self.root.after_idle(self._paint_locker_chips)
+        main.bind("<Configure>", chips_resize, add="+")
+
         # grids
         holder = tk.Frame(main, bg=BG)
         holder.pack(side="top", fill="both", expand=True)
@@ -1943,6 +2741,12 @@ class App:
         self.grids["news"].wide = True
         self.grids["news"].text_h = int(78 * s)
         self.grids["news"].empty_text = "Loading Fortnite news..."
+        self.grids["locker"] = VirtualGrid(self, holder, self.draw_locker_tile, self.show_locker_detail,
+                                           lambda e: self.clip_player.toggle() if self.clip_player else self.open_url(e["featured"]),
+                                           self.context_menu)
+        self.grids["locker"].empty_text = "Loading the locker..."
+        self.grids["stats"] = StatsView(self, holder)
+        self.grids["locker"].canvas.bind("<space>", lambda e: (self.clip_player.toggle() if self.clip_player else None, "break")[-1])
         self.grids["shop"].empty_text = "Loading Item Shop..."
         self.grids["sprites"].empty_text = "Loading Sprites..."
         sc = self.grids["sprites"].canvas
@@ -1960,12 +2764,17 @@ class App:
         root.bind("<Control-Key-4>", lambda e: self.set_mode("weapons"))
         root.bind("<Control-Key-5>", lambda e: self.set_mode("map"))
         root.bind("<Control-Key-6>", lambda e: self.set_mode("news"))
+        root.bind("<Control-Key-7>", lambda e: self.set_mode("locker"))
+        root.bind("<Control-Key-8>", lambda e: self.set_mode("stats"))
         self.search.bind("<Return>", self._search_return)
         root.bind("<Control-v>", self._ctrl_v, add="+")
         root.bind("<F5>", lambda e: self.refresh_all())
         self.search.bind("<Escape>", lambda e: self.search_vars[self.mode].set(""))
 
     def _search_return(self, e):
+        if self.mode == "stats":
+            self.lookup_player(self.search_vars["stats"].get(), self._stats_platform())
+            return "break"
         if self.mode == "map" and self.map_data:
             terms = self.search_vars["map"].get().lower().split()
             locs = [b for b in self.map_locations() if all(t in b["name"].lower() for t in terms)]
@@ -2008,17 +2817,28 @@ class App:
         self.nav_weapons.set_active(mode == "weapons")
         self.nav_map.set_active(mode == "map")
         self.nav_news.set_active(mode == "news")
+        self.nav_locker.set_active(mode == "locker")
+        self.nav_stats.set_active(mode == "stats")
         self.search.configure(textvariable=self.search_vars[mode])
         self.placeholder.configure(text={"browse": "Search cosmetics, sets, IDs...",
                                          "shop": "Search the Item Shop...",
                                          "sprites": "Search sprites...",
                                          "weapons": "Search weapons & items...",
                                          "map": "Search layers & locations...",
-                                         "news": "Search Fortnite news..."}[mode])
+                                         "news": "Search Fortnite news...",
+                                         "locker": "Search the locker: names, sets, seasons...",
+                                         "stats": "Player name, then Enter..."}[mode])
         self._update_search_decor()
         (self.browse_tools.pack(side="left") if mode == "browse" else self.browse_tools.pack_forget())
         (self.sprite_bar.pack(side="left") if mode == "sprites" else self.sprite_bar.pack_forget())
         (self.weapon_bar.pack(side="left") if mode == "weapons" else self.weapon_bar.pack_forget())
+        (self.locker_bar.pack(side="left") if mode == "locker" else self.locker_bar.pack_forget())
+        if mode == "locker":
+            self.locker_chips.pack(side="top", fill="x", before=self.grid_holder, padx=int(14 * self.scale), pady=(0, int(6 * self.scale)))
+            self._paint_locker_chips()
+        else:
+            self.locker_chips.pack_forget()
+        (self.stats_bar.pack(side="left") if mode == "stats" else self.stats_bar.pack_forget())
         if mode == "sprites":
             self.sprite_hero.pack(side="top", fill="x", before=self.grid_holder)
         else:
@@ -2027,7 +2847,7 @@ class App:
             w.pack_forget()
         if mode == "sprites":
             self.sprite_tools.pack(side="right", padx=(0, 8))
-        elif mode in ("map", "news"):
+        elif mode in ("map", "news", "locker", "stats"):
             pass
         else:  # right-packed: first packed sits furthest right
             self.cache_btn.pack(side="right")
@@ -2044,6 +2864,8 @@ class App:
                 self.show_map_hit(self.grid.hit_sel)
             else:
                 self.show_map_info()
+        elif mode == "stats":
+            self.show_stats_detail()
         elif sel is not None and self.grid.flat:
             self.grid.on_select(self.grid.flat[sel])
         else:
@@ -2094,6 +2916,35 @@ class App:
                      padx=16).pack(fill="x", pady=(int(12 * self.scale), int(2 * self.scale)))
             SideRow(inner, "fortnite.com/news", "↗", lambda: self.open_in_chrome(FN_NEWS), self.f_base, self.f_small).pack(fill="x")
             SideRow(inner, "Fortnite.GG archive", "↗", lambda: self.open_in_chrome(FGG_NEWS), self.f_base, self.f_small).pack(fill="x")
+        elif self.mode == "stats":
+            self.side_heading.configure(text="MODES")
+            boards = (self.stats_data or {}).get("boards", [])
+            for m in self.stats_modes():
+                n = sum(1 for b in boards if b["mode"] == m["id"])
+                row = SideRow(inner, m["name"], str(n or ""), lambda m=m: self.set_stats_mode(m["id"]), self.f_base, self.f_small)
+                row.pack(fill="x")
+                row.set_active(m["id"] == self.stats_mode)
+            for title, lst, star in (("TRACKED", self.stats_store.tracked, "★ "), ("RECENT", self.stats_store.recent, "")):
+                if lst:
+                    tk.Label(inner, text=title, bg=SIDEBAR, fg=MUTED, font=self.f_section, anchor="w",
+                             padx=16).pack(fill="x", pady=(int(12 * self.scale), int(2 * self.scale)))
+                    for r in lst:
+                        SideRow(inner, star + r["name"], "" if r["platform"] == "epic" else PLATFORMS[r["platform"]],
+                                lambda r=r: self.lookup_player(r["name"], r["platform"]), self.f_base, self.f_small).pack(fill="x")
+        elif self.mode == "locker":
+            t = self.locker_type_obj()
+            self.side_heading.configure(text=(t["name"] if t else "LOCKER").upper())
+            for label, n in self.locker_filters():
+                row = SideRow(inner, label, f"{n:,}" if t else "", lambda f=label: self.set_locker_filter(f), self.f_base, self.f_small)
+                row.pack(fill="x")
+                row.set_active(label == self.locker_filter)
+            secs = [x for x in self.grids["locker"].sections if x.get("title")]
+            if secs:
+                tk.Label(inner, text="SEASONS", bg=SIDEBAR, fg=MUTED, font=self.f_section, anchor="w",
+                         padx=16).pack(fill="x", pady=(int(12 * self.scale), int(2 * self.scale)))
+                for sec in secs:
+                    SideRow(inner, sec["title"], str(len(sec["items"])),
+                            lambda t=sec["title"]: self.grid.scroll_to_section(t), self.f_base, self.f_small).pack(fill="x")
         elif self.mode == "weapons":
             self.side_heading.configure(text="CLASSES")
             for sec in self.grids["weapons"].sections:
@@ -2128,6 +2979,8 @@ class App:
         self.load_weapons()
         self.load_map()
         self.load_news()
+        self.load_locker()
+        self.load_stats()
 
     def _set_loading(self, what, on):
         (self.loading.add if on else self.loading.discard)(what)
@@ -2231,6 +3084,8 @@ class App:
             self.build_sidebar_list()
         self.apply_filter("shop")
         self.grids["browse"].redraw()
+        if self.locker_type_obj():
+            self.apply_filter("locker")
         self._tick(reschedule=False)
 
     # ------------------------------------------------------------ filtering
@@ -2242,6 +3097,9 @@ class App:
         if mode == "map":
             if self.mode == "map":
                 self.build_sidebar_list()
+            self.update_status()
+            return
+        if mode == "stats":
             self.update_status()
             return
         terms = self.search_vars[mode].get().lower().split()
@@ -2283,6 +3141,13 @@ class App:
             g.set_sections(self.news_sections(terms), keep_key=keep)
             if self.mode == "news":
                 self.build_sidebar_list()
+        elif mode == "locker":
+            g.empty_text = (f"Couldn't load the locker.\n{self.locker_error}\n\nPress F5 to retry."
+                            if self.locker_error and not self.locker else
+                            "Nothing matches." if self.locker_type_obj() else "Loading the locker...")
+            g.set_sections(self.locker_sections(terms), keep_key=keep)
+            if self.mode == "locker":
+                self.build_sidebar_list(keep_scroll=True)
         elif mode == "sprites":
             g.empty_text = (f"Couldn't load the Sprite list.\n{self.sprite_error}\n\nPress F5 to retry."
                             if self.sprite_error and not self.sprites else
@@ -2316,6 +3181,21 @@ class App:
                        f"archive updated {self.news['updated'].replace('T', ' ')}   ·   Epic news via Fortnite.GG & fortnite-api.com")
             else:
                 txt = "Loading Fortnite news..." if "news" in self.loading else "News unavailable"
+        elif self.mode == "stats":
+            if self.stats_data:
+                d = self.stats_data
+                txt = (f"Season {d.get('season')} stats   ·   {len(d['boards'])} leaderboards   ·   updated {d['updated'].replace('T', ' ')}"
+                       f"   ·   player stats & leaderboards: Fortnite.GG")
+            else:
+                txt = "Loading stats..." if "stats" in self.loading else "Stats unavailable"
+        elif self.mode == "locker":
+            t = self.locker_type_obj()
+            if t:
+                txt = (f"Showing {len(self.grids['locker'].flat):,} of {len(t['items']):,} {t['name'].lower()}   ·   "
+                       f"updated {self.locker['index'].get('updated')}   ·   showcase videos & data: Fortnite.GG"
+                       + ("" if av or not t.get("video") else "   ·   pip install av for in-app playback"))
+            else:
+                txt = "Loading the locker..." if "locker" in self.loading else "Locker unavailable"
         elif self.mode == "map":
             if self.map_data:
                 txt = (f"Season {self.map_data.get('season')} map   ·   {len(self.map_on or ())} layers on   ·   "
@@ -2401,6 +3281,13 @@ class App:
                     if ck == self.detail_ck and self.detail_img is not None:
                         self.detail_photo = ph
                         self.detail_img.configure(image=ph)
+                    if self.clip_player and ck == self.clip_player.poster_ck:
+                        self.clip_player.set_poster(ph)
+                    sv = self.grids["stats"]
+                    if ck in sv.wait:
+                        sv.wait.discard(ck)
+                        if self.mode == "stats":
+                            sv.schedule(150)
                     if ck in self.wanted or (self.shop and ck[0] == self.shop["vbuck"]):
                         dirty = True
                     if ck in self.detail_wait:
@@ -2430,6 +3317,40 @@ class App:
                     week = (date.today() - timedelta(days=7)).isoformat()
                     self.nav_news.set_right(str(sum(1 for n in msg[1]["items"] if n["date"] >= week)) or "")
                     self.apply_filter("news")
+                elif kind == "locker_index":
+                    self.locker, self.locker_error = msg[1], None
+                    self.nav_locker.set_right(f"{sum(t['count'] for t in msg[1]['index']['types']):,}")
+                    if not any(t["id"] == self.locker_type for t in msg[1]["index"]["types"]):
+                        self.locker_type = msg[1]["index"]["types"][0]["id"]
+                    self._paint_locker_chips()
+                    self.ensure_locker_type(self.locker_type, lambda t: self._locker_ready())
+                elif kind == "locker_type":
+                    _, tid, tdata = msg
+                    if tdata and self.locker:
+                        self.locker["types"][tid] = tdata
+                        for e in tdata["items"]:
+                            if e["epic_id"]:
+                                self.locker["by_id"][e["epic_id"].lower()] = e
+                    for cb in self.locker_wait.pop(tid, []):
+                        cb(tdata)
+                elif kind == "stats":
+                    self._set_loading("stats", False)
+                    self.stats_data, self.stats_error = msg[1], None
+                    self.nav_stats.set_right(msg[1].get("season") or "")
+                    if self.mode == "stats":
+                        self.build_sidebar_list()
+                        self.grids["stats"].render()
+                        self.update_status()
+                elif kind == "stats_player":
+                    _, req, player = msg
+                    if req == self.stats_req:
+                        if player.get("stats"):
+                            player["history"] = self.stats_store.record(player["name"], player["platform"], player["mode"], player["stats"])
+                        self.stats_player = player
+                        if self.mode == "stats":
+                            self.grids["stats"].render()
+                            self.show_stats_detail()
+                            self.build_sidebar_list(keep_scroll=True)
                 elif kind == "maptile":
                     self.grids["map"].on_tile(msg[1], msg[2])
                 elif kind == "mapicon":
@@ -2465,6 +3386,13 @@ class App:
                     elif what == "news":
                         self.news_error = err
                         self.apply_filter("news")
+                    elif what == "locker":
+                        self.locker_error = err
+                        self.apply_filter("locker")
+                    elif what == "stats":
+                        self.stats_error = err
+                        if self.mode == "stats":
+                            self.grids["stats"].render()
                     elif what == "map":
                         self.map_error = err
                         self.grids["map"].empty_text = f"Couldn't load the map.\n{err}\n\nPress F5 to retry."
@@ -2609,6 +3537,8 @@ class App:
 
     # ------------------------------------------------------------ detail panel
     def _detail_reset(self):
+        if self.clip_player:
+            self.clip_player.close()
         for w in self.detail.inner.winfo_children():
             w.destroy()
         self.detail.scroll_top()
@@ -2699,14 +3629,27 @@ class App:
                           "Enter / double-click  -  open image\n"
                           "Right-click  -  copy name / ID\n"
                           "Ctrl+F  -  search      F5  -  refresh\n"
-                          "Ctrl+1 - 6  -  Cosmetics / Shop / Sprites / Weapons / Map / News\n\n"
+                          "Ctrl+1 - 8  -  Cosmetics / Shop / Sprites / Weapons / Map / News / Locker / Stats\n\n"
                           "Sprites:  click Owned / Mastered on a card,\nSpace owned,  M mastered,  Ctrl+V paste photo",
                     self.f_small, MUTED).configure(anchor="center", justify="center")
 
     def show_cosmetic_detail(self, it):
         body = self._detail_reset()
         bg = rarity_bg(it["rarity_key"])
-        self._detail_image(body, it["icon"], 512, bg)
+        em = self.locker and self.locker["by_id"].get(it["id"].lower())
+        lt = LOCKER_BACKEND.get(it.get("backend"))
+        if not em and lt and self.locker and lt not in self.locker["types"]:  # load that type, then show its showcase
+            def again(t, it=it):
+                g = self.grids["browse"]
+                if t and self.mode == "browse" and g.selected is not None and g.flat[g.selected] is it:
+                    self.show_cosmetic_detail(it)
+            self.ensure_locker_type(lt, again)
+        if em and em["has_video"]:
+            self.clip_player = ClipPlayer(self, body, em, self.big)
+        elif em:
+            self._detail_image(body, em["featured"], 512, bg)
+        else:
+            self._detail_image(body, it["icon"], 512, bg)
         self._label(body, it["name"], self.f_title)
         self._badges(body, [(it["rarity"].upper(), rarity_color(it["rarity_key"]), "white"),
                             (it["type"].upper(), PANEL_2, FG)])
@@ -2727,6 +3670,8 @@ class App:
             facts.append(("Added", it["added"][:10]))
         facts.append(("ID", it["id"]))
         self._facts(body, facts)
+        if em:
+            self._link(body, "Open in Locker", f"{em['season_short']}  ›", lambda: self.goto_locker(em["type"], em["g"]))
         self._buttons(body, [("Copy ID", lambda: self.copy(it["id"], "ID")),
                              ("Copy name", lambda: self.copy(it["name"], "name")),
                              ("Open image", lambda: self.open_url(it["featured"] or it["icon"]))])
@@ -2808,6 +3753,16 @@ class App:
         m.delete(0, "end")
         if "sp" in it:
             self._sprite_menu(m, it)
+            m.tk_popup(e.x_root, e.y_root)
+            return
+        if "g" in it and "page" in it:  # locker item
+            m.add_command(label="Copy name", command=lambda: self.copy(it["name"], "name"))
+            if it["video"]:
+                m.add_command(label="Open HD video in browser", command=lambda: self.open_url(it["video"]))
+            m.add_command(label="Open image", command=lambda: self.open_url(it["featured"]))
+            m.add_command(label="View on Fortnite.GG", command=lambda: self.open_in_chrome(it["page"]))
+            if it["epic_id"] in self.items_by_id:
+                m.add_command(label="Open in Cosmetics", command=lambda: self.goto_cosmetic(it["epic_id"]))
             m.tk_popup(e.x_root, e.y_root)
             return
         if "image_large" in it:  # news story
@@ -3713,6 +4668,391 @@ class App:
                    command=lambda: self.open_in_chrome(FN_NEWS)).pack(fill="x", pady=(int(8 * s), 0))
         ttk.Button(body, text="News archive on Fortnite.GG",
                    command=lambda: self.open_in_chrome(FGG_NEWS)).pack(fill="x", pady=(int(6 * s), 0))
+        self.detail.bind_tree()
+
+    # ------------------------------------------------------------ locker
+    def _locker_json(self, name):
+        """data/locker/<name>: live (refreshed daily by GitHub Actions) -> last good copy -> copy shipped with the app."""
+        errors = []
+        try:
+            raw = http_get(LOCKER_URL + name, timeout=60)
+            data = json.loads(raw)
+            LOCKER_DIR.mkdir(parents=True, exist_ok=True)
+            (LOCKER_DIR / name).write_bytes(raw)
+            return data
+        except Exception as e:
+            errors.append(e)
+        for path in (LOCKER_DIR / name, bundled_data_path(f"locker/{name}")):
+            try:
+                if path and path.exists():
+                    return json.loads(path.read_text(encoding="utf-8"))
+            except Exception as e:
+                errors.append(e)
+        raise errors[0]
+
+    def load_locker(self):
+        if "locker" in self.loading:
+            return
+        self._set_loading("locker", True)
+
+        def work():
+            try:
+                index = self._locker_json("index.json")
+                if index.get("schema") != 1 or not isinstance(index.get("types"), list) or not index["types"]:
+                    raise ValueError("unsupported locker data")
+                self.results.put(("locker_index", {"index": index, "types": {}, "by_id": {}}))
+            except Exception as e:
+                self.results.put(("error", "locker", e))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def ensure_locker_type(self, tid, callback=None):
+        """Load data/locker/<tid>.json once (in a thread); callback(type or None) runs on the Tk thread."""
+        if not self.locker:
+            return
+        if tid in self.locker["types"]:
+            if callback:
+                callback(self.locker["types"][tid])
+            return
+        first = tid not in self.locker_wait
+        self.locker_wait.setdefault(tid, [])
+        if callback:
+            self.locker_wait[tid].append(callback)
+        if not first:
+            return
+        info = next((t for t in self.locker["index"]["types"] if t["id"] == tid), None)
+        index = self.locker["index"]
+
+        def work():
+            data = None
+            try:
+                if info:
+                    data = normalize_locker_type(index, info, self._locker_json(info["file"]))
+            except Exception:
+                data = None
+            self.results.put(("locker_type", tid, data))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _locker_ready(self):
+        self._set_loading("locker", False)
+        self.apply_filter("locker")
+        if self.mode == "locker":
+            self.build_sidebar_list()
+        g = self.grids["browse"]
+        if self.mode == "browse" and g.selected is not None and g.flat:
+            self.show_cosmetic_detail(g.flat[g.selected])
+
+    def locker_type_obj(self, tid=None):
+        return (self.locker or {}).get("types", {}).get(tid or self.locker_type)
+
+    def _paint_locker_chips(self):
+        for w in self.locker_chips.winfo_children():
+            w.destroy()
+        if not self.locker:
+            return
+        avail = self.grid_holder.winfo_width() - int(30 * self.scale)
+        if avail < 200:
+            avail = int(900 * self.scale)
+        row, used = None, avail + 1
+        for t in self.locker["index"]["types"]:  # flow layout: wrap chips onto as many rows as needed
+            on = t["id"] == self.locker_type
+            text = f"{t['name'].upper()}  {t['count']:,}"
+            w = self.f_section.measure(text) + 18 + 5
+            if used + w > avail:
+                row, used = tk.Frame(self.locker_chips, bg=BG), 0
+                row.pack(anchor="w", pady=(0, 4))
+            b = tk.Label(row, text=text, bg=ACCENT if on else PANEL_2,
+                         fg=ACCENT_FG if on else FG_2, font=self.f_section, padx=9, pady=4, cursor="hand2")
+            b.pack(side="left", padx=(0, 5))
+            b.bind("<Button-1>", lambda e, tid=t["id"]: self.set_locker_type(tid))
+            used += w
+
+    def set_locker_type(self, tid, then=None):
+        self.locker_type = tid
+        self.locker_filter = "All"
+        self._save_settings()
+        self._paint_locker_chips()
+        g = self.grids["locker"]
+        g.selected = None
+        if tid not in (self.locker or {}).get("types", {}):
+            g.set_sections([])
+
+        def ready(t):
+            if self.locker_type != tid:
+                return
+            self.apply_filter("locker")
+            g.canvas.yview_moveto(0)
+            g.redraw()
+            if self.mode == "locker":
+                self.build_sidebar_list()
+                if then:
+                    then()
+                else:
+                    self.show_empty_detail()
+
+        self.ensure_locker_type(tid, ready)
+
+    def _locker_match(self, e, tag, t):
+        if tag is None:
+            return True
+        if tag == "@season":
+            return e["season"] == t["current"]
+        if tag == "@shop":
+            return bool(e["epic_id"]) and e["epic_id"] in self.shop_by_item
+        return tag in e["tags"]
+
+    def locker_filters(self):
+        t = self.locker_type_obj()
+        if not t:
+            return [("All", 0)]
+        out = []
+        for label, tag in LOCKER_FILTERS:
+            n = sum(1 for e in t["items"] if self._locker_match(e, tag, t))
+            if n or label in ("All", "This season", "In the shop now"):
+                out.append((label, n))
+        return out
+
+    def set_locker_filter(self, f):
+        self.locker_filter = f
+        self.apply_filter("locker")
+
+    def locker_sections(self, terms):
+        t = self.locker_type_obj()
+        if not t:
+            return []
+        tag = dict(LOCKER_FILTERS).get(self.locker_filter)
+        lst = [e for e in t["items"] if self._locker_match(e, tag, t) and all(x in e["search"] for x in terms)]
+        sort = self.locker_sort_var.get()
+        if sort == "Name A-Z":
+            return [{"title": None, "items": sorted(lst, key=lambda e: e["name"].lower())}]
+        if sort == "Rarity (high-low)":
+            return [{"title": None, "items": sorted(lst, key=lambda e: (-rarity_rank(e["rarity_key"]), e["name"].lower()))}]
+        if sort == "Oldest":
+            lst.reverse()
+        secs = {}
+        for e in lst:
+            secs.setdefault(e["season"], []).append(e)
+        return [{"title": v[0]["season_label"], "subtitle": f"{len(v)} {(t['single'] if len(v) == 1 else t['name']).lower()}",
+                 "items": v} for v in secs.values()]
+
+    def draw_locker_tile(self, c, e, x, y, w, h, hover, sel):
+        s = self.scale
+        round_rect(c, x, y, x + w, y + h, RADIUS, fill=PANEL_HOVER if hover else PANEL, outline="")
+        bg = rarity_bg(e["rarity_key"])
+        ph = self.request_image(e["icon"], self.thumb_store, w, bg)
+        if ph is not None:
+            c.create_image(x, y, image=ph, anchor="nw")
+        else:
+            round_rect(c, x, y, x + w, y + w, RADIUS, fill=shade(bg[1], 0.15), outline="")
+        c.create_rectangle(x, y + w - int(3 * s), x + w, y + w, fill=rarity_color(e["rarity_key"]), outline="")
+        if hover and e["has_video"]:  # play badge
+            r = int(17 * s)
+            cx, cy = x + w // 2, y + w // 2
+            c.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#111111", outline="", stipple="gray75")
+            c.create_polygon(cx - r * 0.3, cy - r * 0.45, cx - r * 0.3, cy + r * 0.45, cx + r * 0.5, cy, fill="white", outline="")
+        pad = int(8 * s)
+        c.create_text(x + pad, y + w + int(7 * s), anchor="nw", fill=FG, font=self.f_tile,
+                      text=self.ellipsize(e["name"], self.f_tile, w - 2 * pad))
+        c.create_text(x + pad, y + w + int(25 * s), anchor="nw", fill=MUTED, font=self.f_small,
+                      text=self.ellipsize(f"{e['season_short']} · {e['rarity']}", self.f_small, w - 2 * pad))
+        t = self.locker_type_obj(e["type"])
+        if e["epic_id"] and e["epic_id"] in self.shop_by_item:
+            self._pill(c, x + int(6 * s), y + int(6 * s), "IN SHOP", "#1f8f50")
+        elif t and e["season"] == t["current"]:
+            self._pill(c, x + int(6 * s), y + int(6 * s), "NEW", ACCENT, ACCENT_FG)
+        self._finish_card(c, x, y, w, h, hover, sel)
+
+    def show_locker_detail(self, e):
+        body = self._detail_reset()
+        s = self.scale
+        if e["has_video"]:
+            self.clip_player = ClipPlayer(self, body, e, self.big)
+        else:
+            self._detail_image(body, e["featured"], 512, rarity_bg(e["rarity_key"]))
+        self._label(body, e["name"].upper(), self.f_title)
+        badges = [(e["rarity"].upper(), rarity_color(e["rarity_key"]), "white"), (e["type_name"].upper(), PANEL_2, FG)]
+        badges += [(LOCKER_TAG_NAMES.get(t, t.upper()), PANEL_2, FG) for t in e["tags"]]
+        self._badges(body, badges)
+        cos = self.items_by_id.get(e["epic_id"]) if e["epic_id"] else None
+        offer = self.shop_by_item.get(e["epic_id"]) if e["epic_id"] else None
+        if offer:
+            self._link(body, "●  In the Item Shop now", f"{offer['final']:,} V-Bucks  ›",
+                       lambda: self.goto_offer(offer["key"]), fg=GREEN, bg="#1f3a24")
+            tk.Frame(body, bg=PANEL, height=int(6 * s)).pack()
+        if cos and cos["description"]:
+            self._label(body, cos["description"], self.f_base, FG_2, pady=(0, int(12 * s)))
+        facts = [("Type", e["type_name"]), ("Season", e["season_label"])]
+        if e["added"]:
+            facts.append(("Added", fmt_news_date(e["added"])))
+        if e["set"]:
+            facts.append(("Set", e["set"]))
+        if e["source"]:
+            facts.append(("Source", e["source"]))
+        if e["price"]:
+            facts.append(("Price", f"{e['price']:,} V-Bucks"))
+        if e["last_seen"]:
+            facts.append(("Last in shop", fmt_news_date(e["last_seen"])))
+        if e["epic_id"]:
+            facts.append(("ID", e["epic_id"]))
+        self._facts(body, facts)
+        if cos:
+            self._link(body, "Open in Cosmetics", f"{cos['type']}  ›", lambda: self.goto_cosmetic(cos["id"]))
+        self._buttons(body, [("Copy name", lambda: self.copy(e["name"], "name")),
+                             ("Open HD video", lambda: self.open_url(e["video"])) if e["has_video"] else
+                             ("Open image", lambda: self.open_url(e["featured"]))])
+        ttk.Button(body, text="View on Fortnite.GG", style="Accent.TButton",
+                   command=lambda: self.open_in_chrome(e["page"])).pack(fill="x", pady=(int(8 * s), 0))
+        if cos:
+            self._store_button(body, lambda: self.open_in_chrome(epic_item_url(cos)))
+        self.detail.bind_tree()
+
+    def goto_locker(self, tid, g):
+        self.set_mode("locker")
+        self.search_vars["locker"].set("")
+
+        def pick():
+            self.grid.canvas.focus_set()
+            self.grid.select_key(f"{tid}:{g}")
+
+        if self.locker_type != tid or self.locker_filter != "All":
+            self.set_locker_type(tid, then=pick)
+        else:
+            self.apply_filter("locker")
+            pick()
+
+    # ------------------------------------------------------------ stats
+    def load_stats(self):
+        if "stats" in self.loading:
+            return
+        self._set_loading("stats", True)
+
+        def check(d):
+            if not isinstance(d, dict) or d.get("schema") != 1 or not isinstance(d.get("boards"), list):
+                raise ValueError("unsupported stats data")
+            return d
+
+        def work():
+            errors = []
+            try:  # live (refreshed every 3 h by GitHub Actions) -> last good copy -> copy shipped with the app
+                raw = http_get(STATS_URL, timeout=30)
+                data = check(json.loads(raw))
+                STATS_FILE.write_bytes(raw)
+                self.results.put(("stats", data))
+                return
+            except Exception as e:
+                errors.append(e)
+            for path in (STATS_FILE, bundled_data_path("stats.json")):
+                try:
+                    if path and path.exists():
+                        self.results.put(("stats", check(json.loads(path.read_text(encoding="utf-8")))))
+                        return
+                except Exception as e:
+                    errors.append(e)
+            self.results.put(("error", "stats", errors[0]))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def stats_modes(self):
+        return (self.stats_data or {}).get("modes") or STATS_MODES_DEFAULT
+
+    def stats_mode_obj(self, mid=None):
+        mid = mid or self.stats_mode
+        return next((m for m in self.stats_modes() if m["id"] == mid), self.stats_modes()[0])
+
+    def stats_url(self, which, name, platform, mode):
+        tpl = (self.stats_data or {}).get(which) or ("https://fortnite.gg{path}?player={name}{platform}" +
+                                                       ("&ajax" if which == "playerApi" else ""))
+        return (tpl.replace("{path}", self.stats_mode_obj(mode)["path"]).replace("{name}", urllib.parse.quote(name))
+                .replace("{platform}", f"&platform={platform}" if platform and platform != "epic" else ""))
+
+    def _stats_platform(self):
+        return next((k for k, v in PLATFORMS.items() if v == self.stats_platform_var.get()), "epic")
+
+    def lookup_player(self, name, platform="epic", mode=None):
+        name = (name or "").strip()
+        if not name:
+            return
+        mode = mode or self.stats_mode
+        if self.mode != "stats":
+            self.set_mode("stats")
+        self.search_vars["stats"].set(name)
+        self.stats_platform_var.set(PLATFORMS.get(platform, "Epic"))
+        self.stats_req += 1
+        req = self.stats_req
+        self.stats_player = {"name": name, "platform": platform, "mode": mode, "loading": True}
+        self.grids["stats"].render()
+        self.grids["stats"].canvas.yview_moveto(0)
+        self.show_stats_detail()
+        url = self.stats_url("playerApi", name, platform, mode)
+
+        def work():
+            p = {"name": name, "platform": platform, "mode": mode, "at": datetime.now()}
+            try:
+                j = json.loads(http_get(url, timeout=30))
+                if j.get("error"):
+                    err = re.sub(r"<h2.*?</h2>", " ", str(j["error"]), flags=re.S)  # drop the site's "back to search" link
+                    p["error"] = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", err))).strip() or "Player not found."
+                elif not j.get("stats"):
+                    p["error"] = "Stats are currently unavailable."
+                else:
+                    p["stats"] = j["stats"]
+                    p["name"] = j["stats"].get("name") or name
+            except Exception as e:
+                p["error"] = f"Stats are currently unavailable ({e})."
+            self.results.put(("stats_player", req, p))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def set_stats_mode(self, mid):
+        self.stats_mode = mid
+        p = self.stats_player
+        if p and not p.get("loading"):
+            self.lookup_player(p["name"], p["platform"], mid)
+        else:
+            self.grids["stats"].render()
+        self.build_sidebar_list(keep_scroll=True)
+
+    def toggle_tracked_player(self):
+        p = self.stats_player
+        if p and p.get("stats"):
+            self.stats_store.toggle_tracked(p["name"], p["platform"])
+            self.grids["stats"].render()
+            self.build_sidebar_list(keep_scroll=True)
+
+    def show_stats_detail(self):
+        body = self._detail_reset()
+        s = self.scale
+        p = self.stats_player
+        if p and p.get("stats"):
+            st, dv = p["stats"], derive_stats(p["stats"])
+            mode = self.stats_mode_obj(p["mode"])
+            self._label(body, p["name"].upper(), self.f_title)
+            self._badges(body, [(PLATFORMS.get(p["platform"], "Epic").upper(), PANEL_2, FG), (mode["name"].upper(), PANEL_2, FG)])
+            facts = [("Wins", f"{st.get('wins', 0):,}"), ("Win rate", f"{dv['win_pct']}%"), ("K/D", str(dv["kd"])),
+                     ("Kills", f"{st.get('kills', 0):,}"), ("Matches", f"{st.get('matches', 0):,}"),
+                     ("Time played", fmt_minutes(dv["time"]))]
+            if st.get("rank_text") and (p["mode"] == "arena" or p["mode"].startswith("ranked")):
+                facts.append(("Rank", st["rank_text"]))
+            self._facts(body, facts)
+            summary = (f"{p['name']}: {st.get('wins', 0):,} wins, {dv['win_pct']}% win rate, {dv['kd']} K/D, "
+                       f"{st.get('kills', 0):,} kills ({mode['name']}, Season {(self.stats_data or {}).get('season', '')})")
+            self._buttons(body, [("Copy stats", lambda: self.copy(summary, "stats")),
+                                 ("Copy name", lambda: self.copy(p["name"], "name"))])
+            ttk.Button(body, text="Open on Fortnite.GG", style="Accent.TButton",
+                       command=lambda: self.open_in_chrome(self.stats_url("playerPage", p["name"], p["platform"], p["mode"]))
+                       ).pack(fill="x", pady=(int(8 * s), 0))
+        else:
+            self._label(body, "STATS", self.f_title)
+            self._label(body, "Season stats for any player (Epic, Xbox or PlayStation name): wins, win rate, K/D, kills per "
+                              "match, time played, and rank for Ranked and Arenas.\n\nEvery lookup is saved on this PC so you can "
+                              "see progress since your last check, and ★ Track keeps a player one click away in the sidebar.",
+                        self.f_base, FG_2, pady=(int(6 * s), int(12 * s)))
+            d = self.stats_data or {}
+            self._facts(body, [("Leaderboards", f"{len(d.get('boards', []))} boards · top 40" if d else "-"),
+                               ("Season", d.get("season") or "-"), ("Data", "Fortnite.GG")])
+            ttk.Button(body, text="Fortnite.GG stats", style="Accent.TButton",
+                       command=lambda: self.open_in_chrome("https://fortnite.gg/stats")).pack(fill="x", pady=(int(8 * s), 0))
         self.detail.bind_tree()
 
     # ------------------------------------------------------------ interactive map

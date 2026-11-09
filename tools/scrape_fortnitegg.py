@@ -1,4 +1,4 @@
-"""Build docs/data/weapons.json, docs/data/map.json and docs/data/news.json from Fortnite.GG.
+"""Build docs/data/weapons.json, map.json, news.json, stats.json and locker/*.json from Fortnite.GG.
 
 Sources (used with the site owner's permission):
   https://fortnite.gg/weapons                         current Battle Royale loot pool (cards + spawn rates)
@@ -6,11 +6,14 @@ Sources (used with the site owner's permission):
   https://fortnite.gg/weapons/weapon/<slug>           full stat matrix, damage falloff, where to find it
   https://fortnite.gg/  (+ /data/en.js, /data/spawns.js)  interactive map: layers, markers, named locations
   https://fortnite.gg/news?page=N                      archive of Epic's official Fortnite news (image, date, text, links)
+  https://fortnite.gg/cosmetics (+ /data/items/all.en.js)  every outfit, emote, pickaxe, glider...; showcase clips at fnggcdn.com/items/<id>/
+  https://fortnite.gg/stats[/<mode>]?leaderboard=<key>  season leaderboards (level / wins / kills / time / rank), top 40
 
 Standard library only. Run:
   python tools/scrape_fortnitegg.py                 # all three files
-  python tools/scrape_fortnitegg.py --only news     # just one (weapons | map | news)
+  python tools/scrape_fortnitegg.py --only news     # just one (weapons | map | news | locker | stats)
 Options: --out docs/data/weapons.json  --map-out docs/data/map.json  --news-out docs/data/news.json
+         --locker-dir docs/data/locker  --stats-out docs/data/stats.json
          --news-pages 5  --delay 0.6
 """
 import argparse
@@ -331,6 +334,209 @@ def scrape_news(pages, delay):
     }
 
 
+# ---------------------------------------------------------------- locker (every cosmetic type, with showcase clips)
+# (our id, Fortnite.GG type number, fortnite-api.com type.value, plural label, singular label, has showcase video)
+LOCKER_TYPES = [
+    ("outfit", 1, "outfit", "Outfits", "Outfit", True),
+    ("emote", 6, "emote", "Emotes", "Emote", True),
+    ("backpack", 2, "backpack", "Back Blings", "Back Bling", True),
+    ("pickaxe", 3, "pickaxe", "Pickaxes", "Pickaxe", True),
+    ("glider", 4, "glider", "Gliders", "Glider", True),
+    ("sidekick", 32, "sidekick", "Sidekicks", "Sidekick", True),
+    ("kicks", 31, "shoe", "Kicks", "Kicks", True),
+    ("wrap", 7, "wrap", "Wraps", "Wrap", True),
+    ("contrail", 5, "contrail", "Contrails", "Contrail", True),
+    ("aura", 26, "aura", "Auras", "Aura", True),
+    ("emoji", 10, "emoji", "Emoticons", "Emoticon", True),
+    ("spray", 9, "spray", "Sprays", "Spray", False),
+    ("loadingscreen", 12, "loadingscreen", "Loading Screens", "Loading Screen", False),
+]
+# Fortnite.GG tag numbers (from its cosmetics-v2.js filter map). 12 (LEGO-ready) and 18 are too common to be useful.
+LOCKER_TAGS = {1: "styles", 2: "reactive", 3: "traversal", 4: "builtin", 5: "synced", 6: "animated", 14: "dance",
+               17: "unreleased"}
+LOCKER_SOURCES = {1: "Item Shop", 3: "Battle Pass", 4: "Fortnite Crew", 5: "Challenges", 6: "Exclusive", 7: "Pack",
+                  8: "OG Pass", 9: "Music Pass", 10: "LEGO Pass", 11: "Rocket League", 12: "Tournament"}
+FGG_RARITY = {1: "common", 2: "uncommon", 3: "rare", 4: "epic", 5: "legendary", 6: "dark", 7: "frozen", 8: "lava",
+              9: "shadow", 10: "slurp", 11: "icon", 12: "starwars", 13: "dc", 14: "marvel", 15: "gaminglegends",
+              16: "crew"}
+_JS_TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|([{,])([A-Za-z_$][\w$]*):|,(\s*[\]}])')
+
+
+def js_literal(src):
+    """Parse a JS array/object literal with bare keys and trailing commas (Fortnite.GG's items file) as JSON."""
+    def fix(m):
+        if m.group(3) is not None:
+            return m.group(3)  # trailing comma
+        return m.group(0) if m.group(1) is None else f'{m.group(1)}"{m.group(2)}":'
+    return json.loads(_JS_TOKEN.sub(fix, src))
+
+
+def yymmdd(n):
+    s = str(n or "")
+    return f"20{s[0:2]}-{s[2:4]}-{s[4:6]}" if len(s) == 6 else ""
+
+
+def _norm(s):
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def api_cosmetic_ids():
+    """{fortnite-api type.value: {normalized name: [(added date, Epic id), ...]}} for every BR cosmetic."""
+    req = urllib.request.Request("https://fortnite-api.com/v2/cosmetics/br?language=en",
+                                 headers={"User-Agent": UA, "Accept-Encoding": "gzip"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        raw = r.read()
+        if r.headers.get("Content-Encoding") == "gzip":
+            import gzip
+            raw = gzip.decompress(raw)
+    out = {}
+    for c in json.loads(raw)["data"]:
+        t = (c.get("type") or {}).get("value") or ""
+        out.setdefault(t, {}).setdefault(_norm(c.get("name")), []).append(((c.get("added") or "")[:10], c["id"]))
+    return out
+
+
+def parse_locker(items_js, seasons_html="", ids=None):
+    """-> ({our type id: [item, ...] newest first}, {season number: "C7 MS"})"""
+    sets = js_literal(re.search(r"Sets=(\[.*?\]);?\s*(?:\n|Items=)", items_js, re.S).group(1))
+    m = re.search(r"Items=(\[.*?\]);?\s*(?:\n|$)", items_js, re.S)
+    raw = js_literal(m.group(1))
+    seasons = {v: (f"C{c} {lbl}" if lbl else f"Season {v}")
+               for v, c, lbl in re.findall(r"data-key='season' data-val='(\d+)' data-chapter='(\d+)'>([^<]*)", seasons_html)}
+    ids = ids or {}
+    by_fgg = {fgg: (tid, api) for tid, fgg, api, *_ in LOCKER_TYPES}
+    out = {tid: [] for tid, *_ in LOCKER_TYPES}
+    for x in raw:
+        if x.get("type") not in by_fgg or x["id"] >= 9_000_000:  # 9999999 = Fortnite.GG placeholder entry
+            continue
+        tid, api = by_fgg[x["type"]]
+        added = yymmdd(x.get("added"))
+        e = {"g": x["id"], "name": x.get("name") or str(x["id"]), "rarity": FGG_RARITY.get(x.get("rarity"), "common"),
+             "season": x.get("season") or 0, "added": added, "img": x.get("img") or 1}
+        cands = ids.get(api, {}).get(_norm(e["name"]))
+        if cands:  # same name can exist twice (re-releases, LEGO): take the closest release date
+            def gap(c):
+                try:
+                    return abs((datetime.fromisoformat(c[0]) - datetime.fromisoformat(added)).days)
+                except ValueError:
+                    return 99999
+            e["id"] = min(cands, key=gap)[1]
+        # note: the items file's "s" flag is NOT "has sound" (checked against item pages), so it isn't kept
+        tags = [LOCKER_TAGS[t] for t in x.get("t") or [] if t in LOCKER_TAGS]
+        if tags:
+            e["tags"] = tags
+        if isinstance(x.get("set"), int) and 0 <= x["set"] < len(sets):
+            e["set"] = sets[x["set"]].title()
+        if x.get("source") in LOCKER_SOURCES:
+            e["source"] = LOCKER_SOURCES[x["source"]]
+        if x.get("p"):
+            e["price"] = x["p"]
+        if x.get("l"):
+            e["lastSeen"] = yymmdd(x["l"])
+        out[tid].append(e)
+    for lst in out.values():
+        lst.sort(key=lambda e: (e["added"], e["g"]), reverse=True)
+    return out, seasons
+
+
+def scrape_locker():
+    """-> (index dict, {type id: type file dict})"""
+    page = get("/cosmetics?type=outfit")
+    m = re.search(r"/data/items/all\.en\.js\?v=\d+", page)
+    items_js = get(m.group(0) if m else "/data/items/all.en.js")
+    try:
+        ids = api_cosmetic_ids()
+    except Exception as e:  # matching is a bonus; the locker still works without Epic ids
+        print(f"fortnite-api.com cosmetics list failed ({e})", file=sys.stderr)
+        ids = {}
+    by_type, seasons = parse_locker(items_js, page, ids)
+    updated = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    index = {
+        "schema": 1,
+        "updated": updated,
+        "source": "Fortnite.GG (https://fortnite.gg/cosmetics)",
+        "video": "https://fnggcdn.com/items/{g}/video.mp4",
+        "videoSD": "https://fnggcdn.com/items/{g}/video-sd.mp4",
+        "icon": "https://fortnite.gg/img/items/{g}/icon.jpg?{img}",
+        "featured": "https://fortnite.gg/img/items/{g}/featured.png?{img}",
+        "page": "https://fortnite.gg/cosmetics?id={g}",
+        "seasons": seasons,
+        "types": [{"id": tid, "name": name, "single": single, "api": api, "video": video, "count": len(by_type[tid]),
+                   "matched": sum(1 for e in by_type[tid] if e.get("id")), "file": f"{tid}.json"}
+                  for tid, fgg, api, name, single, video in LOCKER_TYPES],
+    }
+    files = {tid: {"schema": 1, "type": tid, "updated": updated, "items": by_type[tid]} for tid in by_type}
+    return index, files
+
+
+# ---------------------------------------------------------------- stats leaderboards
+STATS_MODES = [("all", "/stats", "All modes"), ("br", "/stats/br", "Battle Royale"), ("blitz", "/stats/blitz", "Blitz"),
+               ("og", "/stats/og", "OG"), ("reload", "/stats/reload", "Reload"), ("ranked", "/stats/ranked", "Ranked"),
+               ("ranked-reload", "/stats/ranked-reload", "Ranked Reload"), ("arena", "/stats/arena", "Arenas Boxfights")]
+
+
+def parse_board_value(cell, key):
+    if key == "rank":  # <img src='/img/stats/ranks/21.png?2' ...>UNREAL (25%)
+        icon = re.search(r"/ranks/(\d+)\.png", cell)
+        m = re.match(r"(.*?)\s*\((\d+(?:\.\d+)?)%\)\s*$", text(cell))
+        return {"rank": int(icon.group(1)) if icon else None, "text": (m.group(1) if m else text(cell)).strip(),
+                "pct": float(m.group(2)) if m else None}
+    if key == "time":  # "166H 54M" -> minutes
+        t = text(cell).upper()
+        h, mnt = re.search(r"(\d+)\s*H", t), re.search(r"(\d+)\s*M", t)
+        return (int(h.group(1)) * 60 if h else 0) + (int(mnt.group(1)) if mnt else 0)
+    return num(cell)
+
+
+def parse_board(page, key):
+    m = re.search(r"<h2>.*?>([^<>]*Leaderboard)</h2>.*?<th[^>]*>#</th><th>[^<]*</th><th>([^<]*)</th>(.*?)</tbody>", page, re.S)
+    if not m:
+        return None
+    rows = []
+    for r in re.finditer(r"<tr><td>(\d+)</td><td><a href='([^']*)'>(.*?)</a></td><td>(.*?)</td></tr>", m.group(3), re.S):
+        href = html.unescape(r.group(2))
+        plat = re.search(r"[?&]platform=(\w+)", href)
+        row = {"rank": int(r.group(1)), "name": text(r.group(3)), "value": parse_board_value(r.group(4), key)}
+        if plat and plat.group(1) != "epic":
+            row["platform"] = plat.group(1)
+        rows.append(row)
+    return {"title": text(m.group(1)), "column": text(m.group(2)), "rows": rows}
+
+
+def scrape_stats(delay):
+    boards, season = [], ""
+    for mode, path, name in STATS_MODES:
+        page = get(path)
+        sm = re.search(r"Season ([A-Z0-9]+)\s*<", page) or re.search(r"Season ([A-Z0-9]+)", page)
+        season = season or (sm.group(1) if sm else "")
+        keys = []
+        for k in re.findall(r"leaderboard=(\w+)", page):
+            if k not in keys:
+                keys.append(k)
+        for key in keys:
+            time.sleep(delay)
+            try:
+                b = parse_board(get(f"{path}?leaderboard={key}"), key)
+            except Exception as e:  # keep the other boards
+                print(f"  {mode}/{key}: failed ({e})", file=sys.stderr)
+                continue
+            if b and b["rows"]:
+                boards.append({"mode": mode, "key": key, **b})
+                print(f"  {mode}/{key}: {len(b['rows'])} players")
+        time.sleep(delay)
+    return {
+        "schema": 1,
+        "updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
+        "source": "Fortnite.GG (https://fortnite.gg/stats)",
+        "season": season,
+        "modes": [{"id": m, "path": p, "name": n} for m, p, n in STATS_MODES],
+        "playerApi": BASE + "{path}?player={name}{platform}&ajax",
+        "playerPage": BASE + "{path}?player={name}{platform}",
+        "rankIcon": BASE + "/img/stats/ranks/{rank}.png?2",
+        "boards": boards,
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "docs" / "data" / "weapons.json"))
@@ -338,8 +544,35 @@ def main():
     ap.add_argument("--delay", type=float, default=0.6, help="seconds between detail-page requests")
     ap.add_argument("--news-out", default=str(Path(__file__).resolve().parent.parent / "docs" / "data" / "news.json"))
     ap.add_argument("--news-pages", type=int, default=5, help="news pages to read (12 stories each)")
-    ap.add_argument("--only", choices=["weapons", "map", "news"], help="scrape just one of the files")
+    ap.add_argument("--locker-dir", default=str(Path(__file__).resolve().parent.parent / "docs" / "data" / "locker"))
+    ap.add_argument("--stats-out", default=str(Path(__file__).resolve().parent.parent / "docs" / "data" / "stats.json"))
+    ap.add_argument("--only", choices=["weapons", "map", "news", "locker", "stats"], help="scrape just one of the files")
     args = ap.parse_args()
+
+    if args.only in (None, "stats"):
+        st = scrape_stats(args.delay)
+        Path(args.stats_out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.stats_out).write_text(json.dumps(st, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        print(f"stats: season {st['season']}, {len(st['boards'])} leaderboards -> {args.stats_out}"
+              f" ({Path(args.stats_out).stat().st_size // 1024} KB)")
+        if args.only == "stats":
+            return
+
+    if args.only in (None, "locker"):
+        index, files = scrape_locker()
+        out_dir = Path(args.locker_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for tid, data in files.items():
+            (out_dir / f"{tid}.json").write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        (out_dir / "index.json").write_text(json.dumps(index, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        total = sum(t["count"] for t in index["types"])
+        size = sum(f.stat().st_size for f in out_dir.glob("*.json")) // 1024
+        print(f"locker: {total} items in {len(files)} types ({sum(t['matched'] for t in index['types'])} matched to Epic ids)"
+              f" -> {out_dir} ({size} KB)")
+        for t in index["types"]:
+            print(f"  {t['name']}: {t['count']} ({t['matched']} matched)")
+        if args.only == "locker":
+            return
 
     if args.only in (None, "news"):
         news = scrape_news(args.news_pages, args.delay)

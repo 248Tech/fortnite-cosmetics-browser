@@ -1,1 +1,2 @@
 Pillow>=10.0
+av>=12  # optional: plays emote animations in the app
